@@ -16,7 +16,9 @@ Follow these steps to create an isolated environment and launch the vision detec
    pip3.13 install --upgrade pip
    pip3.13 install -e .
    ```
-4. Run the detector (press `q` to exit the preview window):
+4. Ensure both your Mac and ESP32 are connected to the same hotspot (the Mac will broadcast UDP packets on that network). Disable or allow Python through the macOS firewall if prompted.
+
+5. Run the detector (press `q` to exit the preview window):
    ```bash
    bond-fire-vision --camera-index 0
    ```
@@ -27,3 +29,6 @@ Follow these steps to create an isolated environment and launch the vision detec
 - `--roi 0.15 0.25 0.85 0.9` — set a custom active zone (normalized coordinates).
 - `--confidence 0.6` — require a higher detection confidence.
 - `--no-display` — run headless and log state changes in the console.
+- `--broadcast-ip 255.255.255.255` — change the UDP destination (defaults to broadcast).
+- `--broadcast-port 4210` — match the listening port on the ESP32.
+- `--updates-per-second 20` — lower the broadcast rate if the microcontroller struggles to keep up.

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import socket
+import time
 from dataclasses import dataclass
-from typing import Any, Tuple
+from typing import Any, Dict, Tuple
 
 import cv2
 from ultralytics import YOLO
@@ -25,6 +28,9 @@ class BondFireVision:
         capture_index: int = 0,
         roi: Tuple[float, float, float, float] = (0.2, 0.2, 0.8, 0.8),
         detection_confidence: float = 0.5,
+        broadcast_ip: str = "255.255.255.255",
+        broadcast_port: int = 4210,
+        updates_per_second: float = 30.0,
     ) -> None:
         self._validate_roi(roi)
         self._validate_confidence(detection_confidence)
@@ -34,6 +40,9 @@ class BondFireVision:
         self.roi = roi
         self.detection_confidence = detection_confidence
         self.cap: cv2.VideoCapture | None = None
+        self.broadcast_ip = broadcast_ip
+        self.broadcast_port = broadcast_port
+        self.send_interval = 1.0 / updates_per_second if updates_per_second > 0 else 0.0
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -44,6 +53,7 @@ class BondFireVision:
         Returns:
             Last known detection state.
         """
+        sock = self._create_socket()
         self.cap = cv2.VideoCapture(self.capture_index)
         if not self.cap.isOpened():
             raise RuntimeError("Could not open video source")
@@ -55,6 +65,7 @@ class BondFireVision:
 
         previous_state: VisionState | None = None
         state = VisionState(people_in_roi=0, phone_detected=False)
+        last_send = 0.0
 
         try:
             while True:
@@ -63,6 +74,11 @@ class BondFireVision:
                     raise RuntimeError("Failed to read frame from camera")
 
                 state, processed_frame = self.analyze_frame(frame, annotate=display)
+                now = time.monotonic()
+                if self.send_interval == 0.0 or now - last_send >= self.send_interval:
+                    payload = self._build_payload(state)
+                    self._send_payload(sock, payload)
+                    last_send = now
 
                 if display:
                     cv2.imshow("Bond Fire Vision", processed_frame)
@@ -78,6 +94,10 @@ class BondFireVision:
         except KeyboardInterrupt:
             print("Stopping vision loop.", flush=True)
         finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
@@ -177,3 +197,37 @@ class BondFireVision:
     def _validate_confidence(self, confidence: float) -> None:
         if not 0.0 < confidence <= 1.0:
             raise ValueError("detection_confidence must be between 0 and 1")
+
+    def _create_socket(self) -> socket.socket:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        print(f"Broadcasting to {self.broadcast_ip}:{self.broadcast_port}...", flush=True)
+        return sock
+
+    def _build_payload(self, state: VisionState) -> Dict[str, Any]:
+        text = self._select_text(state)
+        capped_count = min(state.people_in_roi, 5)
+        return {"c": capped_count, "p": state.phone_detected, "t": text}
+
+    def _send_payload(self, sock: socket.socket, payload: Dict[str, Any]) -> None:
+        try:
+            message = json.dumps(payload).encode("utf-8")
+            sock.sendto(message, (self.broadcast_ip, self.broadcast_port))
+        except OSError as exc:
+            print(f"Network Error: {exc}", flush=True)
+
+    def _select_text(self, state: VisionState) -> str:
+        if state.phone_detected:
+            return "SIGNAL INTERFERENCE. DISCONNECT TO CONNECT."
+
+        prompts = {
+            0: "Social Battery: 0%. I need a spark...",
+            1: "One is a start. Battery: 20%",
+            2: "Ask them about a hidden talent.",
+            3: "Battery 60%. We need 2 more!",
+            4: "So close! Find one more human!",
+            5: "CRITICAL MASS ACHIEVED!",
+        }
+        idx = min(state.people_in_roi, 5)
+        return prompts[idx]

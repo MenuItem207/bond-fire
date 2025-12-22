@@ -45,11 +45,32 @@ def main() -> None:
         action="store_true",
         help="Disable the OpenCV preview window (useful on headless devices).",
     )
+    parser.add_argument(
+        "--broadcast-ip",
+        default="255.255.255.255",
+        help="UDP broadcast IP address.",
+    )
+    parser.add_argument(
+        "--broadcast-port",
+        type=int,
+        default=4210,
+        help="UDP port the ESP32 listens on.",
+    )
+    parser.add_argument(
+        "--updates-per-second",
+        type=float,
+        default=30.0,
+        help="Target UDP broadcast rate.",
+    )
 
     args = parser.parse_args()
 
     if not 0.0 < args.confidence <= 1.0:
         parser.error("--confidence must be between 0 and 1")
+    if args.broadcast_port <= 0 or args.broadcast_port > 65535:
+        parser.error("--broadcast-port must be between 1 and 65535")
+    if args.updates_per_second < 0:
+        parser.error("--updates-per-second must be non-negative")
 
     roi = _parse_roi(list(args.roi))
 
@@ -58,6 +79,9 @@ def main() -> None:
         capture_index=args.camera_index,
         roi=roi,
         detection_confidence=args.confidence,
+        broadcast_ip=args.broadcast_ip,
+        broadcast_port=args.broadcast_port,
+        updates_per_second=args.updates_per_second,
     )
 
     try:
