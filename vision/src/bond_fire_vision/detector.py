@@ -119,10 +119,15 @@ class BondFireVision:
                             label = f"Person {conf:.2f}"
                             cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                 elif cls == self.CLASS_PHONE:
-                    phone_detected = True
+                    inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
+                    if inside:
+                        phone_detected = True
                     if annotate:
-                        cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
-                        cv2.putText(frame, "PHONE", (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                        color = (0, 0, 255) if inside else (160, 160, 255)
+                        thickness = 2 if inside else 1
+                        cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
+                        label = "PHONE" if inside else "PHONE (out)"
+                        cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         state = VisionState(people_in_roi=person_count, phone_detected=phone_detected)
 
