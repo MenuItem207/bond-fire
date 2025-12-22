@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: bond-fire-vision
+Version: 0.1.0
+Summary: Vision module for the Empathic Hearth installation.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: ultralytics
+Requires-Dist: opencv-python
+
+# Bond Fire Vision
+
+This package provides the people and phone detection pipeline for **The Empathic Hearth** installation. It uses Ultralytics YOLOv8 to track visitors within a configurable active zone and flags smartphone usage anywhere in view. Install it in editable mode to integrate with the rest of the system or run the provided CLI for quick validation.
