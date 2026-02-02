@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 
 // --- CONFIGURATION ---
-const char* ssid     = "meowmeow"; // <--- UPDATE THIS
+const char* ssid     = "Emmanuel’s iPhone"; // <--- UPDATE THIS
 const char* password = "onseneggpassword123";   // <--- UPDATE THIS
 unsigned int localPort = 4210;
 
