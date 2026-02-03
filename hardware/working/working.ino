@@ -5,6 +5,15 @@
 #include <Adafruit_NeoMatrix.h>
 #include <Adafruit_NeoPixel.h>
 #include <FastLED.h>
+#include <cstring>
+
+DEFINE_GRADIENT_PALETTE(fire_orange_gp) {
+  0,   40,  0,  0,
+  80, 120, 20,  0,
+ 160, 220, 80,  0,
+ 200, 255, 140, 10,
+ 255, 255, 200, 20
+};
 
 // --- WIFI CONFIGURATION ---
 const char* ssid     = "Emmanuel :)";    
@@ -45,6 +54,29 @@ Adafruit_NeoMatrix matrixBack = Adafruit_NeoMatrix(32, 8, PIN_MATRIX_BACK,
 */
 
 CRGB ringLeds[NUM_LEDS_RING];
+CRGBPalette16 firePalette = fire_orange_gp;
+
+enum Mode {
+  MODE_IDLE,
+  MODE_ACTIVE,
+  MODE_PENALTY
+};
+
+Mode currentMode = MODE_IDLE;
+bool transitionActive = false;
+unsigned long transitionUntil = 0;
+uint8_t fireHeat[NUM_LEDS_RING];
+const uint8_t FIRE_COOLING = 55;
+const uint8_t FIRE_SPARKING = 120;
+
+uint8_t scrollCounter = 0;
+
+void startModeTransition(Mode mode);
+uint16_t matrixColorForMode(Mode mode);
+uint16_t matrixTransitionTextColor(Mode mode);
+uint16_t matrixTransitionBackgroundColor(Mode mode);
+CRGB ringTransitionColorForMode(Mode mode);
+void runFireEffect();
 
 // --- VARIABLES ---
 int paxCount = 0;
@@ -91,6 +123,7 @@ void setup() {
   // Setup BOTH Rings (FastLED handles the total count)
   FastLED.addLeds<WS2812B, PIN_RING, GRB>(ringLeds, NUM_LEDS_RING);
   FastLED.setBrightness(100);
+  memset(fireHeat, 0, sizeof(fireHeat));
 
   // 3. WIFI CONNECTION
   WiFi.mode(WIFI_STA);
@@ -143,56 +176,65 @@ void loop() {
   }
 
   // --- HARDWARE LOGIC ---
-  
-  // 1. DETERMINE COLORS & MODES
-  uint16_t textColor;
-  
-  if (phoneDetected) {
-    // === STATE: PENALTY ===
-    ledcWrite(PIN_MIST, MIST_MIN); 
-    ledcWrite(PIN_FAN, 0);        
-    
-    // Grey/Red Glitch on BOTH RINGS
-    fill_solid(ringLeds, NUM_LEDS_RING, CRGB::Grey);
-    if(random(0,10) > 8) ringLeds[random(0, NUM_LEDS_RING)] = CRGB::Red; 
-    
-    textColor = matrixFront.Color(100, 100, 100); // Grey
+  Mode newMode;
+  if (phoneDetected) newMode = MODE_PENALTY;
+  else if (paxCount == 0) newMode = MODE_IDLE;
+  else newMode = MODE_ACTIVE;
 
-  } else if (paxCount == 0) {
-    // === STATE: IDLE ===
-    ledcWrite(PIN_MIST, MIST_MIN);
-    runFanBreathing(40, 80);      
-    
-    // Blue Pulse on BOTH RINGS
-    int breath = (millis() / 20) % 255; 
-    fill_solid(ringLeds, NUM_LEDS_RING, CRGB(0, 0, map(breath, 0, 255, 20, 100)));
-    
-    textColor = matrixFront.Color(0, 0, 255); // Blue
+  if (newMode != currentMode) {
+    currentMode = newMode;
+    startModeTransition(currentMode);
+  }
 
-  } else {
-    // === STATE: ACTIVE ===
-    int upperLimit = (paxCount >= 3) ? MIST_MAX : 220;
-    runMistBreathing(MIST_MIN, upperLimit); 
-    runFanBreathing(100, 255);            
-    
-    // Fire Effect on BOTH RINGS
-    // We loop through ALL LEDs (Ring 1 + Ring 2)
-    for(int i = 0; i < NUM_LEDS_RING; i++) {
-       if(random(0,10) > 3) {
-         int flicker = random(0, 60);
-         ringLeds[i] = CRGB(255 - flicker, 100 - flicker, 0); 
-       }
-    }
-    
-    if (paxCount >= 5) textColor = matrixFront.Color(255, 0, 255); // Purple
-    else textColor = matrixFront.Color(255, 100, 0); // Orange
+  if (transitionActive && millis() >= transitionUntil) {
+    transitionActive = false;
+  }
+
+  uint16_t textColor = matrixColorForMode(currentMode);
+  uint16_t backgroundColor = 0;
+
+  switch (currentMode) {
+    case MODE_PENALTY:
+      ledcWrite(PIN_MIST, MIST_MIN);
+      ledcWrite(PIN_FAN, 0);
+      fill_solid(ringLeds, NUM_LEDS_RING, CRGB::Grey);
+      if (random(0, 10) > 7) {
+        ringLeds[random(0, NUM_LEDS_RING)] = CRGB::Red;
+      }
+      break;
+    case MODE_IDLE:
+      ledcWrite(PIN_MIST, MIST_MIN);
+      runFanBreathing(40, 80);
+      {
+        int breath = (millis() / 20) % 255;
+        uint8_t ember = map(breath, 0, 255, 12, 70);
+        fill_solid(ringLeds, NUM_LEDS_RING, CRGB(ember + 10, ember / 2, 0));
+      }
+      break;
+    case MODE_ACTIVE:
+      {
+        int upperLimit = (paxCount >= 3) ? MIST_MAX : 220;
+        runMistBreathing(MIST_MIN, upperLimit);
+        runFanBreathing(100, 255);
+        runFireEffect();
+        if (paxCount >= 5) {
+          textColor = matrixFront.Color(255, 200, 120);
+        }
+      }
+      break;
+  }
+
+  if (transitionActive && millis() < transitionUntil) {
+    fill_solid(ringLeds, NUM_LEDS_RING, ringTransitionColorForMode(currentMode));
+    textColor = matrixTransitionTextColor(currentMode);
+    backgroundColor = matrixTransitionBackgroundColor(currentMode);
   }
 
   // --- UPDATE DISPLAYS ---
   FastLED.show();
   
   // Update Front Matrix
-  matrixFront.fillScreen(0);
+  matrixFront.fillScreen(backgroundColor);
   matrixFront.setCursor(x, 0);
   matrixFront.setTextColor(textColor);
   matrixFront.print(scrollingText);
@@ -206,9 +248,14 @@ void loop() {
   matrixBack.show();
   */
 
-  // Scroll Logic
-  if(--x < (int)-(scrollingText.length() * 6)) {
-    x = matrixFront.width();
+
+  // Scroll Logic (slower scroll)
+  if (++scrollCounter >= 3) {
+    scrollCounter = 0;
+    x--;
+    if (x < (int)-(scrollingText.length() * 6)) {
+      x = matrixFront.width();
+    }
   }
 
   delay(30);
@@ -229,4 +276,84 @@ void runMistBreathing(int minM, int maxM) {
   }
   mistPower = constrain(mistPower, MIST_MIN, MIST_MAX);
   ledcWrite(PIN_MIST, mistPower);
+}
+
+void startModeTransition(Mode mode) {
+  transitionActive = true;
+  transitionUntil = millis() + 700;
+  // Preload fire heat for active mode so the first frame pops.
+  if (mode == MODE_ACTIVE) {
+    for (int i = 0; i < NUM_LEDS_RING; i++) {
+      fireHeat[i] = random8(120, 200);
+    }
+  }
+}
+
+uint16_t matrixColorForMode(Mode mode) {
+  switch (mode) {
+    case MODE_PENALTY:
+      return matrixFront.Color(200, 60, 60);
+    case MODE_ACTIVE:
+      return matrixFront.Color(255, 100, 0);
+    case MODE_IDLE:
+    default:
+      return matrixFront.Color(180, 120, 40);
+  }
+}
+
+uint16_t matrixTransitionTextColor(Mode mode) {
+  switch (mode) {
+    case MODE_PENALTY:
+      return matrixFront.Color(255, 120, 120);
+    case MODE_ACTIVE:
+      return matrixFront.Color(255, 210, 120);
+    case MODE_IDLE:
+    default:
+      return matrixFront.Color(255, 200, 120);
+  }
+}
+
+uint16_t matrixTransitionBackgroundColor(Mode mode) {
+  switch (mode) {
+    case MODE_PENALTY:
+      return matrixFront.Color(60, 0, 0);
+    case MODE_ACTIVE:
+      return matrixFront.Color(60, 15, 0);
+    case MODE_IDLE:
+    default:
+      return matrixFront.Color(30, 10, 0);
+  }
+}
+
+CRGB ringTransitionColorForMode(Mode mode) {
+  switch (mode) {
+    case MODE_PENALTY:
+      return CRGB(140, 0, 0);
+    case MODE_ACTIVE:
+      return CRGB(255, 140, 20);
+    case MODE_IDLE:
+    default:
+      return CRGB(120, 50, 5);
+  }
+}
+
+void runFireEffect() {
+  for (int i = 0; i < NUM_LEDS_RING; i++) {
+    fireHeat[i] = qsub8(fireHeat[i], random8(0, ((FIRE_COOLING * 10) / NUM_LEDS_RING) + 2));
+  }
+
+  for (int k = NUM_LEDS_RING - 1; k >= 2; k--) {
+    fireHeat[k] = (fireHeat[k - 1] + fireHeat[k - 2] + fireHeat[k - 2]) / 3;
+  }
+
+  if (random8() < FIRE_SPARKING) {
+    int sparkIndex = random8((NUM_LEDS_RING / 6) + 2);
+    fireHeat[sparkIndex] = qadd8(fireHeat[sparkIndex], random8(160, 255));
+  }
+
+  for (int j = 0; j < NUM_LEDS_RING; j++) {
+    uint8_t paletteIndex = scale8(fireHeat[j], 240);
+    CRGB color = ColorFromPalette(firePalette, paletteIndex, 255, LINEARBLEND);
+    ringLeds[j] = color;
+  }
 }

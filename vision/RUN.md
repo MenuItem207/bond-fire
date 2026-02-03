@@ -23,6 +23,35 @@ Follow these steps to create an isolated environment and launch the vision detec
    bond-fire-vision --camera-index 0
    ```
 
+### Enable AI-Generated Prompts
+
+1. Set your OpenAI API key (or pass via `--ai-api-key`):
+   ```bash
+   export BOND_FIRE_OPENAI_API_KEY=sk-...
+   ```
+2. Launch the detector with AI prompts (frames sampled every 5 s by default):
+   ```bash
+   bond-fire-vision --camera-index 0 --ai-prompts --ai-interval 5
+   ```
+   - Console logs will show when the AI worker starts and whenever it updates the prompt.
+   - Environment overrides:
+     - `BOND_FIRE_OPENAI_MODEL` (defaults to `gpt-4o-mini`)
+     - `BOND_FIRE_AI_INTERVAL`, `BOND_FIRE_AI_TEMPERATURE`, `BOND_FIRE_AI_PROMPT_TTL`
+
+### Manual Packet Sender
+
+Use the CLI helper to craft and broadcast test payloads:
+
+```bash
+python manual_packet_sender.py --interactive
+```
+
+Common options:
+
+- `python manual_packet_sender.py ghost` — send a single preset packet.
+- `python manual_packet_sender.py --count 3 --text "Hey there"` — override people count and text.
+- `python manual_packet_sender.py --repeat 0 --rate 2` — stream packets continuously at 2 Hz until Ctrl+C.
+
 ## Optional Flags
 
 - `--model /path/to/weights.pt` — override the YOLOv8 weights file.
