@@ -3,6 +3,7 @@ pyproject.toml
 src/bond_fire_vision/__init__.py
 src/bond_fire_vision/cli.py
 src/bond_fire_vision/detector.py
+src/bond_fire_vision/prompting.py
 src/bond_fire_vision.egg-info/PKG-INFO
 src/bond_fire_vision.egg-info/SOURCES.txt
 src/bond_fire_vision.egg-info/dependency_links.txt

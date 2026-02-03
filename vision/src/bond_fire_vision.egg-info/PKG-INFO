@@ -6,6 +6,7 @@ Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: ultralytics
 Requires-Dist: opencv-python
+Requires-Dist: openai>=1.60.0
 
 # Bond Fire Vision
 

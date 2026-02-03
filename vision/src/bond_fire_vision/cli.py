@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Tuple
 
@@ -62,6 +63,24 @@ def main() -> None:
         default=30.0,
         help="Target UDP broadcast rate.",
     )
+    parser.add_argument(
+        "--ai-prompts",
+        action="store_true",
+        help="Enable OpenAI-generated prompt text.",
+    )
+    parser.add_argument(
+        "--ai-api-key",
+        help="OpenAI API key override (otherwise use environment variables).",
+    )
+    parser.add_argument(
+        "--ai-interval",
+        type=float,
+        help="Seconds between OpenAI prompt refreshes (default 5).",
+    )
+    parser.add_argument(
+        "--ai-model",
+        help="OpenAI model to use for prompt generation (default gpt-4o-mini).",
+    )
 
     args = parser.parse_args()
 
@@ -74,6 +93,53 @@ def main() -> None:
 
     roi = _parse_roi(list(args.roi))
 
+    env_ai_enabled = os.getenv("BOND_FIRE_AI_PROMPTS", "").lower() in {"1", "true", "yes"}
+    ai_enabled = args.ai_prompts or env_ai_enabled
+
+    env_interval = os.getenv("BOND_FIRE_AI_INTERVAL")
+    if args.ai_interval is not None:
+        ai_interval = args.ai_interval
+    elif env_interval:
+        try:
+            ai_interval = float(env_interval)
+        except ValueError:
+            parser.error("BOND_FIRE_AI_INTERVAL must be a number")
+    else:
+        ai_interval = 5.0
+
+    env_model = os.getenv("BOND_FIRE_OPENAI_MODEL")
+    ai_model = args.ai_model or env_model or "gpt-4o-mini"
+
+    env_temperature = os.getenv("BOND_FIRE_AI_TEMPERATURE")
+    if env_temperature:
+        try:
+            ai_temperature = float(env_temperature)
+        except ValueError:
+            parser.error("BOND_FIRE_AI_TEMPERATURE must be a number")
+    else:
+        ai_temperature = 0.9
+
+    env_ttl = os.getenv("BOND_FIRE_AI_PROMPT_TTL")
+    if env_ttl:
+        try:
+            ai_prompt_ttl = float(env_ttl)
+        except ValueError:
+            parser.error("BOND_FIRE_AI_PROMPT_TTL must be a number")
+    else:
+        ai_prompt_ttl = 30.0
+
+    env_max_tokens = os.getenv("BOND_FIRE_AI_MAX_TOKENS")
+    if env_max_tokens:
+        try:
+            ai_max_tokens = int(env_max_tokens)
+        except ValueError:
+            parser.error("BOND_FIRE_AI_MAX_TOKENS must be an integer")
+    else:
+        ai_max_tokens = 120
+
+    if ai_enabled and ai_interval <= 0:
+        parser.error("--ai-interval must be greater than 0 when AI prompts are enabled")
+
     vision = BondFireVision(
         model_path=args.model,
         capture_index=args.camera_index,
@@ -82,6 +148,13 @@ def main() -> None:
         broadcast_ip=args.broadcast_ip,
         broadcast_port=args.broadcast_port,
         updates_per_second=args.updates_per_second,
+        ai_enabled=ai_enabled,
+        ai_interval=ai_interval,
+        ai_model=ai_model,
+        ai_temperature=ai_temperature,
+        ai_max_output_tokens=ai_max_tokens,
+        ai_prompt_ttl=ai_prompt_ttl,
+        openai_api_key=args.ai_api_key,
     )
 
     try:

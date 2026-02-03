@@ -9,6 +9,8 @@ from typing import Any, Dict, Tuple
 import cv2
 from ultralytics import YOLO
 
+from .prompting import OpenAIPromptGenerator, PromptContext, resolve_api_key
+
 
 @dataclass(eq=True)
 class VisionState:
@@ -31,6 +33,13 @@ class BondFireVision:
         broadcast_ip: str = "255.255.255.255",
         broadcast_port: int = 4210,
         updates_per_second: float = 30.0,
+        ai_enabled: bool = False,
+        ai_interval: float = 5.0,
+        ai_model: str = "gpt-4o-mini",
+        ai_temperature: float = 0.9,
+        ai_max_output_tokens: int = 120,
+        ai_prompt_ttl: float = 30.0,
+        openai_api_key: str | None = None,
     ) -> None:
         self._validate_roi(roi)
         self._validate_confidence(detection_confidence)
@@ -43,6 +52,14 @@ class BondFireVision:
         self.broadcast_ip = broadcast_ip
         self.broadcast_port = broadcast_port
         self.send_interval = 1.0 / updates_per_second if updates_per_second > 0 else 0.0
+        self.ai_enabled = ai_enabled
+        self.ai_interval = ai_interval if ai_interval > 0 else 5.0
+        self.ai_model = ai_model
+        self.ai_temperature = ai_temperature
+        self.ai_max_output_tokens = ai_max_output_tokens
+        self.ai_prompt_ttl = ai_prompt_ttl
+        self._openai_api_key = openai_api_key
+        self._prompt_generator: OpenAIPromptGenerator | None = None
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -63,9 +80,32 @@ class BondFireVision:
             flush=True,
         )
 
+        if self.ai_enabled and self._prompt_generator is None:
+            api_key = resolve_api_key(self._openai_api_key)
+            if api_key:
+                try:
+                    self._prompt_generator = OpenAIPromptGenerator(
+                        api_key=api_key,
+                        model=self.ai_model,
+                        temperature=self.ai_temperature,
+                        max_output_tokens=self.ai_max_output_tokens,
+                        prompt_ttl=self.ai_prompt_ttl,
+                    )
+                    self._prompt_generator.start()
+                    print(
+                        f"AI prompts enabled (model={self.ai_model}, interval={self.ai_interval}s).",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    print(f"AI prompts disabled: {exc}", flush=True)
+                    self._prompt_generator = None
+            else:
+                print("AI prompts disabled: no OpenAI API key found.", flush=True)
+
         previous_state: VisionState | None = None
         state = VisionState(people_in_roi=0, phone_detected=False)
         last_send = 0.0
+        last_prompt_capture = 0.0
 
         try:
             while True:
@@ -79,6 +119,16 @@ class BondFireVision:
                     payload = self._build_payload(state)
                     self._send_payload(sock, payload)
                     last_send = now
+
+                if self._prompt_generator is not None and now - last_prompt_capture >= self.ai_interval:
+                    frame_for_prompt = processed_frame.copy()
+                    context = PromptContext(
+                        people_in_roi=state.people_in_roi,
+                        phone_detected=state.phone_detected,
+                        frame_timestamp=now,
+                    )
+                    self._prompt_generator.submit(frame_for_prompt, context)
+                    last_prompt_capture = now
 
                 if display:
                     cv2.imshow("Bond Fire Vision", processed_frame)
@@ -103,6 +153,9 @@ class BondFireVision:
                 self.cap = None
             if display:
                 cv2.destroyAllWindows()
+            if self._prompt_generator is not None:
+                self._prompt_generator.stop()
+                self._prompt_generator = None
 
         return state
 
@@ -220,6 +273,11 @@ class BondFireVision:
     def _select_text(self, state: VisionState) -> str:
         if state.phone_detected:
             return "SIGNAL INTERFERENCE. DISCONNECT TO CONNECT."
+
+        if self._prompt_generator is not None:
+            prompt = self._prompt_generator.get_latest_prompt()
+            if prompt:
+                return prompt
 
         prompts = {
             0: "Social Battery: 0%. I need a spark...",
