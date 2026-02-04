@@ -31,7 +31,7 @@ Follow these steps to create an isolated environment and launch the vision detec
    ```
 2. Launch the detector with AI prompts (frames sampled every 5 s by default):
    ```bash
-   bond-fire-vision --camera-index 0 --ai-prompts --ai-interval 5
+   bond-fire-vision --camera-index 0 --ai-prompts --ai-interval 15
    ```
    - Console logs will show when the AI worker starts and whenever it updates the prompt.
    - Environment overrides:

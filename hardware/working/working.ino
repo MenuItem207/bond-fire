@@ -34,6 +34,7 @@ unsigned int localPort = 4210;
 
 // --- MIST SETTINGS ---
 #define MIST_MIN 150  
+#define MIST_IDLE 220
 #define MIST_MAX 255
 
 // --- OBJECTS ---
@@ -66,8 +67,8 @@ Mode currentMode = MODE_IDLE;
 bool transitionActive = false;
 unsigned long transitionUntil = 0;
 uint8_t fireHeat[NUM_LEDS_RING];
-const uint8_t FIRE_COOLING = 55;
-const uint8_t FIRE_SPARKING = 120;
+const uint8_t FIRE_COOLING = 70;
+const uint8_t FIRE_SPARKING = 180;
 
 uint8_t scrollCounter = 0;
 
@@ -87,7 +88,7 @@ int x = matrixFront.width();
 // Animation Vars
 int fanSpeed = 60;
 int fanDirection = 5;
-int mistPower = MIST_MIN; 
+int mistPower = MIST_IDLE; 
 int mistDirection = 5;
 
 void setup() {
@@ -117,8 +118,8 @@ void setup() {
   ledcAttach(PIN_FAN, 5000, 8); 
   ledcAttach(PIN_MIST, 1000, 8); 
   
-  // Start Mist at Floor
-  ledcWrite(PIN_MIST, MIST_MIN); 
+  // Start Mist with enough output for humidifier
+  ledcWrite(PIN_MIST, MIST_IDLE); 
 
   // Setup BOTH Rings (FastLED handles the total count)
   FastLED.addLeds<WS2812B, PIN_RING, GRB>(ringLeds, NUM_LEDS_RING);
@@ -157,6 +158,8 @@ void setup() {
 
   udp.begin(localPort);
   scrollingText = "Waiting...";
+  ledcWrite(PIN_MIST, MIST_IDLE);
+  mistPower = MIST_IDLE;
 }
 
 void loop() {
@@ -197,18 +200,25 @@ void loop() {
     case MODE_PENALTY:
       ledcWrite(PIN_MIST, MIST_MIN);
       ledcWrite(PIN_FAN, 0);
-      fill_solid(ringLeds, NUM_LEDS_RING, CRGB::Grey);
-      if (random(0, 10) > 7) {
-        ringLeds[random(0, NUM_LEDS_RING)] = CRGB::Red;
+      fill_solid(ringLeds, NUM_LEDS_RING, CRGB(80, 0, 0));
+      if (random8() < 150) {
+        ringLeds[random8(NUM_LEDS_RING)] = CRGB(255, 40, 40);
+      }
+      if (random8() < 45) {
+        ringLeds[random8(NUM_LEDS_RING)] = CRGB(255, 120, 120);
       }
       break;
     case MODE_IDLE:
-      ledcWrite(PIN_MIST, MIST_MIN);
+      ledcWrite(PIN_MIST, MIST_IDLE);
       runFanBreathing(40, 80);
       {
-        int breath = (millis() / 20) % 255;
-        uint8_t ember = map(breath, 0, 255, 12, 70);
-        fill_solid(ringLeds, NUM_LEDS_RING, CRGB(ember + 10, ember / 2, 0));
+        uint8_t glow = beatsin8(9, 30, 160);
+        for (int i = 0; i < NUM_LEDS_RING; i++) {
+          ringLeds[i] = CHSV(160, 180, glow);
+        }
+        if (random8() < 35) {
+          ringLeds[random8(NUM_LEDS_RING)] = CHSV(160, 20, 255);
+        }
       }
       break;
     case MODE_ACTIVE:
@@ -292,48 +302,48 @@ void startModeTransition(Mode mode) {
 uint16_t matrixColorForMode(Mode mode) {
   switch (mode) {
     case MODE_PENALTY:
-      return matrixFront.Color(200, 60, 60);
+      return matrixFront.Color(255, 80, 80);
     case MODE_ACTIVE:
       return matrixFront.Color(255, 100, 0);
     case MODE_IDLE:
     default:
-      return matrixFront.Color(180, 120, 40);
+      return matrixFront.Color(120, 180, 255);
   }
 }
 
 uint16_t matrixTransitionTextColor(Mode mode) {
   switch (mode) {
     case MODE_PENALTY:
-      return matrixFront.Color(255, 120, 120);
+      return matrixFront.Color(255, 160, 160);
     case MODE_ACTIVE:
-      return matrixFront.Color(255, 210, 120);
+      return matrixFront.Color(255, 220, 140);
     case MODE_IDLE:
     default:
-      return matrixFront.Color(255, 200, 120);
+      return matrixFront.Color(180, 220, 255);
   }
 }
 
 uint16_t matrixTransitionBackgroundColor(Mode mode) {
   switch (mode) {
     case MODE_PENALTY:
-      return matrixFront.Color(60, 0, 0);
+      return matrixFront.Color(80, 0, 0);
     case MODE_ACTIVE:
-      return matrixFront.Color(60, 15, 0);
+      return matrixFront.Color(70, 20, 0);
     case MODE_IDLE:
     default:
-      return matrixFront.Color(30, 10, 0);
+      return matrixFront.Color(10, 20, 50);
   }
 }
 
 CRGB ringTransitionColorForMode(Mode mode) {
   switch (mode) {
     case MODE_PENALTY:
-      return CRGB(140, 0, 0);
+      return CRGB(200, 20, 20);
     case MODE_ACTIVE:
-      return CRGB(255, 140, 20);
+      return CRGB(255, 150, 40);
     case MODE_IDLE:
     default:
-      return CRGB(120, 50, 5);
+      return CRGB(40, 70, 160);
   }
 }
 
@@ -354,6 +364,10 @@ void runFireEffect() {
   for (int j = 0; j < NUM_LEDS_RING; j++) {
     uint8_t paletteIndex = scale8(fireHeat[j], 240);
     CRGB color = ColorFromPalette(firePalette, paletteIndex, 255, LINEARBLEND);
+    color.fadeToBlackBy(random8(0, 45));
+    if (random8() < 40) {
+      color += CRGB(random8(10, 40), random8(0, 15), 0);
+    }
     ringLeds[j] = color;
   }
 }
