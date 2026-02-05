@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from typing import Tuple
 
@@ -24,7 +23,7 @@ def _parse_roi(values: list[float]) -> Tuple[float, float, float, float]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Bond Fire vision detector.")
+    parser = argparse.ArgumentParser(description="Run the Bond Fire vision detector (v2.0).")
     parser.add_argument("--model", default="yolov8n.pt", help="Path to a YOLOv8 weights file.")
     parser.add_argument("--camera-index", type=int, default=0, help="Index of the camera to open.")
     parser.add_argument(
@@ -64,22 +63,46 @@ def main() -> None:
         help="Target UDP broadcast rate.",
     )
     parser.add_argument(
+        "--pulse-interval",
+        type=float,
+        default=15.0,
+        help="Seconds between color pulses in FIRE mode.",
+    )
+    parser.add_argument(
+        "--enable-audio",
+        action="store_true",
+        help="Enable audio subsystem (SFX, music, TTS).",
+    )
+    parser.add_argument(
+        "--audio-volume",
+        type=float,
+        default=0.7,
+        help="Master audio volume (0.0-1.0).",
+    )
+    parser.add_argument(
+        "--narration-enabled",
+        action="store_true",
+        help="Enable TTS narration for prompts.",
+    )
+    
+    # Legacy OpenAI parameters (kept for backward compatibility, ignored)
+    parser.add_argument(
         "--ai-prompts",
         action="store_true",
-        help="Enable OpenAI-generated prompt text.",
+        help="(Legacy) Ignored in v2. Use local prompts.",
     )
     parser.add_argument(
         "--ai-api-key",
-        help="OpenAI API key override (otherwise use environment variables).",
+        help="(Legacy) Ignored in v2.",
     )
     parser.add_argument(
         "--ai-interval",
         type=float,
-        help="Seconds between OpenAI prompt refreshes (default 5).",
+        help="(Legacy) Ignored in v2.",
     )
     parser.add_argument(
         "--ai-model",
-        help="OpenAI model to use for prompt generation (default gpt-4o-mini).",
+        help="(Legacy) Ignored in v2.",
     )
 
     args = parser.parse_args()
@@ -90,55 +113,16 @@ def main() -> None:
         parser.error("--broadcast-port must be between 1 and 65535")
     if args.updates_per_second < 0:
         parser.error("--updates-per-second must be non-negative")
+    if args.pulse_interval <= 0:
+        parser.error("--pulse-interval must be positive")
+    if not 0.0 <= args.audio_volume <= 1.0:
+        parser.error("--audio-volume must be between 0.0 and 1.0")
 
     roi = _parse_roi(list(args.roi))
 
-    env_ai_enabled = os.getenv("BOND_FIRE_AI_PROMPTS", "").lower() in {"1", "true", "yes"}
-    ai_enabled = args.ai_prompts or env_ai_enabled
-
-    env_interval = os.getenv("BOND_FIRE_AI_INTERVAL")
-    if args.ai_interval is not None:
-        ai_interval = args.ai_interval
-    elif env_interval:
-        try:
-            ai_interval = float(env_interval)
-        except ValueError:
-            parser.error("BOND_FIRE_AI_INTERVAL must be a number")
-    else:
-        ai_interval = 5.0
-
-    env_model = os.getenv("BOND_FIRE_OPENAI_MODEL")
-    ai_model = args.ai_model or env_model or "gpt-4o-mini"
-
-    env_temperature = os.getenv("BOND_FIRE_AI_TEMPERATURE")
-    if env_temperature:
-        try:
-            ai_temperature = float(env_temperature)
-        except ValueError:
-            parser.error("BOND_FIRE_AI_TEMPERATURE must be a number")
-    else:
-        ai_temperature = 0.9
-
-    env_ttl = os.getenv("BOND_FIRE_AI_PROMPT_TTL")
-    if env_ttl:
-        try:
-            ai_prompt_ttl = float(env_ttl)
-        except ValueError:
-            parser.error("BOND_FIRE_AI_PROMPT_TTL must be a number")
-    else:
-        ai_prompt_ttl = 30.0
-
-    env_max_tokens = os.getenv("BOND_FIRE_AI_MAX_TOKENS")
-    if env_max_tokens:
-        try:
-            ai_max_tokens = int(env_max_tokens)
-        except ValueError:
-            parser.error("BOND_FIRE_AI_MAX_TOKENS must be an integer")
-    else:
-        ai_max_tokens = 120
-
-    if ai_enabled and ai_interval <= 0:
-        parser.error("--ai-interval must be greater than 0 when AI prompts are enabled")
+    # Warn about legacy flags
+    if args.ai_prompts or args.ai_api_key or args.ai_interval or args.ai_model:
+        print("Warning: OpenAI flags are ignored in v2. Using local prompts.", flush=True)
 
     vision = BondFireVision(
         model_path=args.model,
@@ -148,13 +132,10 @@ def main() -> None:
         broadcast_ip=args.broadcast_ip,
         broadcast_port=args.broadcast_port,
         updates_per_second=args.updates_per_second,
-        ai_enabled=ai_enabled,
-        ai_interval=ai_interval,
-        ai_model=ai_model,
-        ai_temperature=ai_temperature,
-        ai_max_output_tokens=ai_max_tokens,
-        ai_prompt_ttl=ai_prompt_ttl,
-        openai_api_key=args.ai_api_key,
+        pulse_interval=args.pulse_interval,
+        enable_audio=args.enable_audio,
+        audio_volume=args.audio_volume,
+        narration_enabled=args.narration_enabled,
     )
 
     try:

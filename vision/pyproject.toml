@@ -11,6 +11,13 @@ requires-python = ">=3.10"
 dependencies = [
     "ultralytics",
     "opencv-python",
+    "numpy",
+    "pygame>=2.0.0",
+    "pyttsx3>=2.90",
+]
+
+[project.optional-dependencies]
+legacy = [
     "openai>=1.60.0",
 ]
 

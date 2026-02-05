@@ -4,16 +4,27 @@ import json
 import socket
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import cv2
 from ultralytics import YOLO
 
-from .prompting import OpenAIPromptGenerator, PromptContext, resolve_api_key
+from .audio_manager import AudioManager, AudioState
+from .color_analysis import (
+    are_colors_contrasting,
+    extract_dominant_color,
+    get_color_name,
+    get_palette_from_people,
+)
+from .local_prompts import LocalPromptGenerator
+from .packet_builder import PacketBuilderV2, Person
+from .state_machine import State, StateContext, StateMachine
 
 
 @dataclass(eq=True)
 class VisionState:
+    """Detection state (for backward compatibility)."""
+
     people_in_roi: int
     phone_detected: bool
 
@@ -33,6 +44,11 @@ class BondFireVision:
         broadcast_ip: str = "255.255.255.255",
         broadcast_port: int = 4210,
         updates_per_second: float = 30.0,
+        pulse_interval: float = 15.0,
+        enable_audio: bool = False,
+        audio_volume: float = 0.7,
+        narration_enabled: bool = False,
+        # Legacy parameters (ignored, kept for compatibility)
         ai_enabled: bool = False,
         ai_interval: float = 5.0,
         ai_model: str = "gpt-4o-mini",
@@ -41,6 +57,22 @@ class BondFireVision:
         ai_prompt_ttl: float = 30.0,
         openai_api_key: str | None = None,
     ) -> None:
+        """
+        Initialize BondFireVision v2.
+
+        Args:
+            model_path: Path to YOLOv8 weights
+            capture_index: Camera index
+            roi: Active zone (x_min, y_min, x_max, y_max) normalized 0-1
+            detection_confidence: Minimum detection confidence
+            broadcast_ip: UDP broadcast IP
+            broadcast_port: UDP port
+            updates_per_second: Target packet rate
+            pulse_interval: Seconds between color pulses
+            enable_audio: Enable audio subsystem
+            audio_volume: Master audio volume (0.0-1.0)
+            narration_enabled: Enable TTS prompts
+        """
         self._validate_roi(roi)
         self._validate_confidence(detection_confidence)
 
@@ -52,14 +84,24 @@ class BondFireVision:
         self.broadcast_ip = broadcast_ip
         self.broadcast_port = broadcast_port
         self.send_interval = 1.0 / updates_per_second if updates_per_second > 0 else 0.0
-        self.ai_enabled = ai_enabled
-        self.ai_interval = ai_interval if ai_interval > 0 else 5.0
-        self.ai_model = ai_model
-        self.ai_temperature = ai_temperature
-        self.ai_max_output_tokens = ai_max_output_tokens
-        self.ai_prompt_ttl = ai_prompt_ttl
-        self._openai_api_key = openai_api_key
-        self._prompt_generator: OpenAIPromptGenerator | None = None
+
+        # New v2 components
+        self.state_machine = StateMachine(pulse_interval=pulse_interval)
+        self.prompt_generator = LocalPromptGenerator()
+        self.packet_builder = PacketBuilderV2()
+        self.audio_manager: Optional[AudioManager] = None
+
+        if enable_audio:
+            self.audio_manager = AudioManager(
+                enabled=True,
+                master_volume=audio_volume,
+                narration_enabled=narration_enabled,
+            )
+
+        # Tracking state
+        self._tracked_people: Dict[int, Person] = {}
+        self._last_audio_state = AudioState.SILENT
+        self._last_entry_id: Optional[int] = None
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -79,33 +121,15 @@ class BondFireVision:
             "Starting vision system. Press 'q' to exit." if display else "Starting vision system. Ctrl+C to exit.",
             flush=True,
         )
+        print(f"Bondfire v2.0 - Master/Slave Architecture", flush=True)
 
-        if self.ai_enabled and self._prompt_generator is None:
-            api_key = resolve_api_key(self._openai_api_key)
-            if api_key:
-                try:
-                    self._prompt_generator = OpenAIPromptGenerator(
-                        api_key=api_key,
-                        model=self.ai_model,
-                        temperature=self.ai_temperature,
-                        max_output_tokens=self.ai_max_output_tokens,
-                        prompt_ttl=self.ai_prompt_ttl,
-                    )
-                    self._prompt_generator.start()
-                    print(
-                        f"AI prompts enabled (model={self.ai_model}, interval={self.ai_interval}s).",
-                        flush=True,
-                    )
-                except Exception as exc:
-                    print(f"AI prompts disabled: {exc}", flush=True)
-                    self._prompt_generator = None
-            else:
-                print("AI prompts disabled: no OpenAI API key found.", flush=True)
+        # Start audio manager
+        if self.audio_manager:
+            self.audio_manager.start()
 
         previous_state: VisionState | None = None
         state = VisionState(people_in_roi=0, phone_detected=False)
         last_send = 0.0
-        last_prompt_capture = 0.0
 
         try:
             while True:
@@ -115,20 +139,10 @@ class BondFireVision:
 
                 state, processed_frame = self.analyze_frame(frame, annotate=display)
                 now = time.monotonic()
+                
                 if self.send_interval == 0.0 or now - last_send >= self.send_interval:
-                    payload = self._build_payload(state)
-                    self._send_payload(sock, payload)
+                    self._send_update(sock, now)
                     last_send = now
-
-                if self._prompt_generator is not None and now - last_prompt_capture >= self.ai_interval:
-                    frame_for_prompt = processed_frame.copy()
-                    context = PromptContext(
-                        people_in_roi=state.people_in_roi,
-                        phone_detected=state.phone_detected,
-                        frame_timestamp=now,
-                    )
-                    self._prompt_generator.submit(frame_for_prompt, context)
-                    last_prompt_capture = now
 
                 if display:
                     cv2.imshow("Bond Fire Vision", processed_frame)
@@ -153,44 +167,72 @@ class BondFireVision:
                 self.cap = None
             if display:
                 cv2.destroyAllWindows()
-            if self._prompt_generator is not None:
-                self._prompt_generator.stop()
-                self._prompt_generator = None
+            if self.audio_manager:
+                self.audio_manager.stop()
+
+            # Print stats
+            stats = self.packet_builder.get_stats()
+            print(f"Session stats: {stats['total_packets']} packets, avg {stats['average_fps']:.1f} fps", flush=True)
 
         return state
 
     def analyze_frame(self, frame: Any, annotate: bool = True) -> tuple[VisionState, Any]:
-        """Analyze a single frame and optionally draw annotations."""
+        """Analyze a single frame with tracking and color extraction."""
         height, width = frame.shape[:2]
         roi_pixels = self._roi_pixels(width, height)
 
         person_count = 0
         phone_detected = False
+        people_in_roi: list[Person] = []
 
         if annotate:
             self._draw_roi(frame, roi_pixels)
 
-        results = self.model(frame, stream=True, verbose=False)
+        # Use track() instead of model() for persistent IDs
+        results = self.model.track(frame, persist=True, verbose=False, conf=self.detection_confidence)
+        
         for result in results:
-            for box in result.boxes:
+            if result.boxes is None or result.boxes.id is None:
+                continue
+                
+            for box, track_id in zip(result.boxes, result.boxes.id):
                 cls = int(box.cls[0])
                 conf = float(box.conf[0])
                 if conf < self.detection_confidence:
                     continue
 
                 x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
+                tid = int(track_id)
 
                 if cls == self.CLASS_PERSON:
                     inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
                     if inside:
                         person_count += 1
+                        
+                        # Extract shirt color
+                        shirt_rgb = extract_dominant_color(frame, (x1, y1, x2, y2))
+                        shirt_name = get_color_name(shirt_rgb)
+                        
+                        # Normalize bbox
+                        bbox_norm = (x1 / width, y1 / height, x2 / width, y2 / height)
+                        
+                        person = Person(
+                            id=tid,
+                            bbox=bbox_norm,
+                            shirt_rgb=shirt_rgb,
+                            shirt_name=shirt_name,
+                        )
+                        people_in_roi.append(person)
+                        self._tracked_people[tid] = person
+                        
                     if annotate:
                         color = (0, 255, 0) if inside else (0, 0, 255)
                         thickness = 2 if inside else 1
                         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
                         if inside:
-                            label = f"Person {conf:.2f}"
+                            label = f"ID:{tid} {self._tracked_people.get(tid, person).shirt_name if tid in self._tracked_people or inside else ''}"
                             cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                            
                 elif cls == self.CLASS_PHONE:
                     inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
                     if inside:
@@ -202,10 +244,22 @@ class BondFireVision:
                         label = "PHONE" if inside else "PHONE (out)"
                         cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
+        # Update state machine
+        context = StateContext(
+            people_count=person_count,
+            phone_detected=phone_detected,
+            timestamp=time.monotonic(),
+        )
+        active_ids = {p.id for p in people_in_roi}
+        state_output = self.state_machine.update(context, active_ids)
+
+        # Store people for packet building
+        self._tracked_people = {p.id: p for p in people_in_roi}
+
         state = VisionState(people_in_roi=person_count, phone_detected=phone_detected)
 
         if annotate:
-            self._draw_status(frame, state)
+            self._draw_status(frame, state, state_output.state)
 
         return state, frame
 
@@ -214,8 +268,9 @@ class BondFireVision:
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
         cv2.putText(frame, "Active Zone", (x1, max(y1 - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
-    def _draw_status(self, frame, state: VisionState) -> None:
-        status_text = f"People in Zone: {state.people_in_roi} | Phone Detected: {'YES' if state.phone_detected else 'NO'}"
+    def _draw_status(self, frame, state: VisionState, current_state: State) -> None:
+        """Draw status overlay on frame."""
+        status_text = f"{current_state.value}: {state.people_in_roi} people | Phone: {'YES' if state.phone_detected else 'NO'}"
         color = (0, 0, 255) if state.phone_detected else (0, 255, 0)
         (text_w, _), _ = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
         cv2.rectangle(frame, (5, 5), (15 + text_w, 40), (0, 0, 0), -1)
@@ -258,34 +313,105 @@ class BondFireVision:
         print(f"Broadcasting to {self.broadcast_ip}:{self.broadcast_port}...", flush=True)
         return sock
 
-    def _build_payload(self, state: VisionState) -> Dict[str, Any]:
-        text = self._select_text(state)
-        capped_count = min(state.people_in_roi, 5)
-        return {"c": capped_count, "p": state.phone_detected, "t": text}
+    def _send_update(self, sock: socket.socket, timestamp: float) -> None:
+        """Build and send v2.1 packet."""
+        # Get current state output
+        state_output = self.state_machine._calculate_output(
+            len(self._tracked_people),
+            False,  # pulse_active is tracked in state machine
+            self.state_machine._entry_flash_id,
+        )
 
-    def _send_payload(self, sock: socket.socket, payload: Dict[str, Any]) -> None:
+        # Get people list
+        people = list(self._tracked_people.values())
+
+        # Generate palette from people colors
+        people_colors = [p.shirt_rgb for p in people]
+        dominant_palette = get_palette_from_people(people_colors, max_colors=4)
+
+        # Check for color contrasts
+        colors_contrasting = False
+        if len(people_colors) >= 2:
+            colors_contrasting = are_colors_contrasting(people_colors[0], people_colors[1])
+
+        # Generate prompt
+        phone_flag = len(people) > 0 and any(p for p in people)  # Simplified
+        context = StateContext(
+            people_count=len(people),
+            phone_detected=self.state_machine.state == State.PHONE,
+            timestamp=timestamp,
+        )
+        
+        # Handle entry flash and prompts
+        if state_output.entry_flash_id and state_output.entry_flash_id != self._last_entry_id:
+            # New person entry
+            person = self._tracked_people.get(state_output.entry_flash_id)
+            if person:
+                prompt = self.prompt_generator.get_entry_prompt(person.shirt_name)
+                if self.audio_manager:
+                    self.audio_manager.play_sfx("whoosh", volume=0.8)
+                    if self.audio_manager.narration_enabled:
+                        self.audio_manager.speak(prompt)
+            else:
+                prompt = self.prompt_generator.generate(
+                    state_output.state,
+                    len(people),
+                    len(set(p.shirt_rgb for p in people)),
+                    colors_contrasting,
+                )
+            self._last_entry_id = state_output.entry_flash_id
+        elif state_output.pulse_active:
+            # Color pulse
+            color_names = [p.shirt_name for p in people]
+            prompt = self.prompt_generator.get_pulse_prompt(color_names)
+            if self.audio_manager:
+                self.audio_manager.play_sfx("chime", volume=0.4)
+        else:
+            # Normal prompt
+            prompt = self.prompt_generator.generate(
+                state_output.state,
+                len(people),
+                len(set(p.shirt_rgb for p in people)),
+                colors_contrasting,
+            )
+
+        # Determine audio state
+        audio_state = self._map_audio_state(state_output.state)
+        
+        # Trigger audio changes
+        if audio_state != self._last_audio_state and self.audio_manager:
+            self.audio_manager.set_state(audio_state)
+            self._last_audio_state = audio_state
+
+        # Build packet
+        packet = self.packet_builder.build(
+            state=state_output.state,
+            people=people,
+            phone_detected=context.phone_detected,
+            dominant_palette=dominant_palette,
+            prompt=prompt,
+            mist_pwm=state_output.mist_pwm,
+            fan_pwm=state_output.fan_pwm,
+            pulse_active=state_output.pulse_active,
+            entry_flash_id=state_output.entry_flash_id,
+            audio_state=audio_state,
+        )
+
+        # Send packet
         try:
-            message = json.dumps(payload).encode("utf-8")
+            message = json.dumps(packet).encode("utf-8")
             sock.sendto(message, (self.broadcast_ip, self.broadcast_port))
         except OSError as exc:
             print(f"Network Error: {exc}", flush=True)
 
-    def _select_text(self, state: VisionState) -> str:
-        if state.phone_detected:
-            return "SIGNAL INTERFERENCE. DISCONNECT TO CONNECT."
-
-        if self._prompt_generator is not None:
-            prompt = self._prompt_generator.get_latest_prompt()
-            if prompt:
-                return prompt
-
-        prompts = {
-            0: "Social Battery: 0%. I need a spark...",
-            1: "One is a start. Battery: 20%",
-            2: "Ask them about a hidden talent.",
-            3: "Battery 60%. We need 2 more!",
-            4: "So close! Find one more human!",
-            5: "CRITICAL MASS ACHIEVED!",
-        }
-        idx = min(state.people_in_roi, 5)
-        return prompts[idx]
+    def _map_audio_state(self, state: State) -> AudioState:
+        """Map state machine state to audio state."""
+        if state == State.IDLE:
+            return AudioState.SILENT
+        elif state == State.FIRE:
+            return AudioState.AMBIENT
+        elif state == State.PARTY:
+            return AudioState.PARTY
+        elif state == State.PHONE:
+            return AudioState.ALERT
+        return AudioState.SILENT
