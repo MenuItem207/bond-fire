@@ -59,8 +59,8 @@ def main() -> None:
     parser.add_argument(
         "--updates-per-second",
         type=float,
-        default=30.0,
-        help="Target UDP broadcast rate.",
+        default=60.0,
+        help="Target UDP broadcast rate (packets/sec).",
     )
     parser.add_argument(
         "--pulse-interval",

@@ -79,16 +79,15 @@ class AudioManager:
 
     # Asset mappings
     ASSET_MAP = {
-        "fire_crackle": "sfx/fire_crackle_loop.mp3",
-        "whoosh": "sfx/whoosh_entry.mp3",
-        "buzzer": "sfx/buzzer_alert.mp3",
-        "party_horn": "sfx/party_horn.mp3",
-        "chime": "sfx/soft_chime.mp3",
-        "buildup_start": "sfx/buildup_start.mp3",  # Low tone to signal build-up beginning
-        "buildup_pulse": "sfx/buildup_pulse.mp3",  # Pulsing tone during build-up
-        "supernova": "sfx/supernova_burst.mp3",  # Explosion sound when party starts
-        "ambient_music": "music/ambient_chill.mp3",
-        "party_music": "music/party_upbeat.mp3",
+        "fire_crackle": "sfx/fire_crackle_loop.wav",
+        "whoosh": "sfx/whoosh_entry.wav",
+        "buzzer": "sfx/buzzer_alert.wav",
+        "party_horn": "sfx/party_horn.wav",
+        "chime": "sfx/soft_chime.wav",
+        "buildup_start": "sfx/buildup_start.wav",  # Low tone to signal build-up beginning
+        "buildup_pulse": "sfx/buildup_pulse.wav",  # Pulsing tone during build-up
+        "supernova": "sfx/supernova_burst.wav",  # Explosion sound when party starts
+        "party_music": "music/party_upbeat.wav",
     }
 
     def __init__(
@@ -133,6 +132,7 @@ class AudioManager:
 
         # State tracking
         self._current_state = AudioState.SILENT
+        self._fire_intensity = 0.0  # 0.0-1.0, scales background fire crackle volume
         self._loaded_sounds: dict[str, any] = {}
         self._music_channel: Optional[any] = None
         self._sfx_channels: dict[AudioChannel, any] = {}
@@ -394,6 +394,33 @@ class AudioManager:
         except queue.Full:
             pass
 
+    def set_fire_intensity(self, intensity: float) -> None:
+        """Set fire intensity for AMBIENT state background audio scaling.
+
+        Args:
+            intensity: Fire intensity 0.0-1.0, scales crackle volume
+        """
+        if not self.enabled:
+            return
+
+        intensity = max(0.0, min(1.0, intensity))
+        self._fire_intensity = intensity
+        
+        # If in AMBIENT state, update the fire crackle volume immediately
+        if self._current_state == AudioState.AMBIENT:
+            volume = 0.2 + (intensity * 0.5)  # Maps 0.0-1.0 to 0.2-0.7 volume
+            try:
+                # Queue a volume update for the fire crackle SFX
+                self._queue.put_nowait(
+                    AudioCommand(
+                        action="set_volume",
+                        channel=AudioChannel.SFX_PRIMARY,
+                        volume=volume,
+                    )
+                )
+            except queue.Full:
+                pass
+
     def _worker(self) -> None:
         """Background worker thread for audio playback."""
         while not self._stop_event.is_set():
@@ -512,8 +539,9 @@ class AudioManager:
         if cmd.state == AudioState.SILENT:
             mixer.music.stop()
         elif cmd.state == AudioState.AMBIENT:
-            self.play_music("ambient_music", loop=True, volume=0.5)
-            self.play_sfx("fire_crackle", volume=0.3)
+            # Play fire crackle as background loop, scaled by fire_intensity
+            volume = 0.2 + (self._fire_intensity * 0.5)  # Maps 0.0-1.0 to 0.2-0.7 volume
+            self.play_sfx("fire_crackle", volume=volume)
         elif cmd.state == AudioState.PARTY:
             self.play_music("party_music", loop=True, volume=0.8)
             self.play_sfx("party_horn", volume=1.0)

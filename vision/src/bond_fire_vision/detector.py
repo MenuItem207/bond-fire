@@ -43,7 +43,7 @@ class BondFireVision:
         detection_confidence: float = 0.5,
         broadcast_ip: str = "255.255.255.255",
         broadcast_port: int = 4210,
-        updates_per_second: float = 30.0,
+        updates_per_second: float = 60.0,
         pulse_interval: float = 15.0,
         enable_audio: bool = False,
         audio_volume: float = 0.7,
@@ -110,6 +110,7 @@ class BondFireVision:
         self._celebration_prompt: Optional[str] = None  # Store celebration prompt to avoid toggling
         self._latest_state_output: Optional[Any] = None  # Cache latest state output for packet building
         self._last_narrated_prompt: Optional[str] = None  # Track last narrated prompt to avoid repeats
+        self._last_sent_prompt: Optional[str] = None  # Cache prompt to prevent unnecessary resets
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -414,11 +415,16 @@ class BondFireVision:
                 colors_contrasting,
             )
 
-        # Narrate ALL prompts when they change
+        # Narrate prompts when they change
         if self.audio_manager and self.audio_manager.narration_enabled:
             if prompt != self._last_narrated_prompt:
                 self.audio_manager.speak(prompt)
                 self._last_narrated_prompt = prompt
+        
+        # Update last sent prompt only if it actually changed
+        # This prevents ESP32 from seeing redundant updates and resetting the scroll
+        if prompt != self._last_sent_prompt:
+            self._last_sent_prompt = prompt
 
         # Determine audio state
         audio_state = self._map_audio_state(state_output.state)
@@ -427,6 +433,10 @@ class BondFireVision:
         if audio_state != self._last_audio_state and self.audio_manager:
             self.audio_manager.set_state(audio_state)
             self._last_audio_state = audio_state
+        
+        # Update fire crackle volume with fire intensity in AMBIENT state
+        if audio_state == AudioState.AMBIENT and self.audio_manager:
+            self.audio_manager.set_fire_intensity(state_output.fire_intensity)
         
         # Trigger build-up audio when party buildup starts
         if state_output.party_buildup_progress > 0.0 and not self._party_buildup_started:
