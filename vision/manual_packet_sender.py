@@ -1,4 +1,4 @@
-"""Manual UDP packet sender for Bond Fire hardware testing."""
+"""Manual UDP packet sender for Bond Fire v2.1 protocol testing."""
 
 from __future__ import annotations
 
@@ -8,38 +8,40 @@ import socket
 import sys
 import time
 from types import SimpleNamespace
-from typing import Dict, Tuple
+from typing import Any, Dict
 
-PROMPTS: Dict[int, str] = {
-    0: "Social Battery: 0%. I need a spark...",
-    1: "One is a start. Battery: 20%",
-    2: "Ask them about a hidden talent.",
-    3: "Battery 60%. We need 2 more!",
-    4: "So close! Find one more human!",
-    5: "CRITICAL MASS ACHIEVED!",
-}
+# v2.1 State names
+STATE_NAMES = ["IDLE", "FIRE", "PARTY", "PHONE"]
 
-PRESETS: Dict[str, Tuple[int, bool, str | None]] = {
-    "ghost": (0, False, None),
-    "spark": (1, False, None),
-    "kindle": (2, False, None),
-    "flame": (3, False, None),
-    "blaze": (4, False, None),
-    "supernova": (5, False, "CRITICAL MASS ACHIEVED!"),
-    "penalty": (0, True, "SIGNAL INTERFERENCE. DISCONNECT TO CONNECT."),
+# Preset configurations: (state, people_count, phone_detected, prompt)
+PRESETS: Dict[str, tuple[str, int, bool, str]] = {
+    "idle": ("IDLE", 0, False, "Waiting for guests..."),
+    "spark": ("FIRE", 1, False, "One is a start. Battery: 25%"),
+    "kindle": ("FIRE", 2, False, "Ask them about a hidden talent."),
+    "flame": ("FIRE", 3, False, "We're getting warmer. Battery: 75%"),
+    "blaze": ("FIRE", 4, False, "So close! One more human!"),
+    "supernova": ("PARTY", 5, False, "CRITICAL MASS ACHIEVED!"),
+    "phone": ("PHONE", 0, True, "SIGNAL INTERFERENCE. DISCONNECT TO CONNECT."),
 }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Send manual Bond Fire UDP packets to the ESP32.",
+        description="Send manual Bond Fire v2.1 UDP packets to ESP32.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("state", nargs="?", choices=sorted(PRESETS.keys()), help="Preset state to send.")
-    parser.add_argument("--count", type=int, help="Override people count (c)")
-    parser.add_argument("--phone", action="store_true", help="Force phone detected flag on.")
-    parser.add_argument("--no-phone", action="store_true", help="Force phone detected flag off.")
-    parser.add_argument("--text", help="Override scrolling text (t)")
+    parser.add_argument("preset", nargs="?", choices=sorted(PRESETS.keys()), help="Preset configuration to send.")
+    parser.add_argument("--state", choices=STATE_NAMES, help="Override state (IDLE/FIRE/PARTY/PHONE).")
+    parser.add_argument("--people", type=int, help="Number of people detected (0-6).")
+    parser.add_argument("--phone", action="store_true", help="Enable phone detection.")
+    parser.add_argument("--no-phone", action="store_true", help="Disable phone detection.")
+    parser.add_argument("--prompt", help="Override text prompt.")
+    parser.add_argument("--mist", type=int, default=220, help="Mist PWM (0-255).")
+    parser.add_argument("--fan", type=int, default=100, help="Fan PWM (0-255).")
+    parser.add_argument("--fire-intensity", type=float, default=0.5, help="Fire intensity (0.0-1.0).")
+    parser.add_argument("--palette", nargs="+", type=int, help="Dominant palette as RGB triplets [r g b r g b ...].")
+    parser.add_argument("--pulse", action="store_true", help="Activate pulse effect.")
+    parser.add_argument("--celebration", action="store_true", help="Trigger celebration effect.")
     parser.add_argument("--ip", default="255.255.255.255", help="Destination IP address.")
     parser.add_argument("--port", type=int, default=4210, help="Destination UDP port.")
     parser.add_argument("--rate", type=float, default=1.0, help="Messages per second when repeating.")
@@ -47,62 +49,100 @@ def parse_args() -> argparse.Namespace:
         "--repeat",
         type=int,
         default=1,
-        help="Number of times to send the packet. Use 0 for continuous until interrupted.",
+        help="Number of times to send. Use 0 for continuous until interrupted.",
     )
     parser.add_argument("--interactive", action="store_true", help="Launch interactive prompt mode.")
     return parser.parse_args()
 
 
-def build_payload(args: argparse.Namespace) -> Dict[str, object]:
-    base = PRESETS.get(args.state) if args.state else (0, False, None)
-    count = args.count if args.count is not None else base[0]
-    if count < 0:
-        raise ValueError("Count must be non-negative")
+def build_v2_1_payload(args: argparse.Namespace) -> Dict[str, Any]:
+    """Build a v2.1 protocol packet."""
+    # Start with preset values
+    if args.preset:
+        state, people, phone, prompt = PRESETS[args.preset]
+    else:
+        state, people, phone, prompt = "IDLE", 0, False, "Waiting..."
 
-    phone_flag = base[1]
-    if args.phone and args.no_phone:
-        raise ValueError("Cannot use --phone and --no-phone together")
+    # Override with command-line args
+    if args.state:
+        state = args.state
+    if args.people is not None:
+        people = max(0, min(6, args.people))
     if args.phone:
-        phone_flag = True
+        phone = True
     if args.no_phone:
-        phone_flag = False
+        phone = False
+    if args.prompt:
+        prompt = args.prompt
 
-    text = args.text or base[2]
-    capped = min(count, 5)
-    if text is None:
-        text = PROMPTS[capped]
+    # Build people array (empty for manual sender, could be extended)
+    people_data = []
 
-    return {"c": capped, "p": phone_flag, "t": text}
+    # Build palette
+    palette = args.palette if args.palette else [255, 100, 0, 200, 50, 0]  # Default orange tones
+    palette = palette[:12]  # Max 12 values (4 colors)
+
+    # Build packet
+    packet = {
+        "version": 2,
+        "timestamp": time.time(),
+        "fps": 30,
+        "state": state,
+        "people": people_data,
+        "phone_detected": phone,
+        "dominant_palette": palette,
+        "prompt": prompt,
+        "mist_pwm": max(0, min(255, args.mist)),
+        "fan_pwm": max(0, min(255, args.fan)),
+        "pulse_active": args.pulse,
+        "entry_flash_id": None,
+        "audio_state": "PARTY" if state == "PARTY" else ("ALERT" if state == "PHONE" else "AMBIENT"),
+        "party_buildup_progress": 0.0,
+        "celebration": args.celebration,
+        "fire_intensity": max(0.0, min(1.0, args.fire_intensity)),
+    }
+
+    return packet
 
 
-def send_payload(sock: socket.socket, ip: str, port: int, payload: Dict[str, object]) -> None:
+def send_payload(sock: socket.socket, ip: str, port: int, payload: Dict[str, Any]) -> None:
+    """Send packet and print confirmation."""
     message = json.dumps(payload).encode("utf-8")
     sock.sendto(message, (ip, port))
-    print(f"Sent -> {message.decode('utf-8')} to {ip}:{port}")
+    state = payload.get("state", "???")
+    people = len(payload.get("people", []))
+    phone = "📱" if payload.get("phone_detected") else ""
+    prompt = payload.get("prompt", "")[:40]
+    print(f"✓ {state} | {people} people {phone} | '{prompt}' | Size: {len(message)} bytes")
 
 
 def _send_with_repetition(
     sock: socket.socket,
     ip: str,
     port: int,
-    payload: Dict[str, object],
+    payload: Dict[str, Any],
     repeat: int,
     rate: float,
 ) -> None:
+    """Send payload with optional repetition."""
     if repeat < 0:
         raise ValueError("--repeat must be zero or positive")
-    if rate < 0:
-        raise ValueError("--rate must be zero or positive")
+    if rate <= 0:
+        raise ValueError("--rate must be positive")
 
     interval = 1.0 / rate if rate > 0 else 0.0
     count = 0
-    while True:
-        send_payload(sock, ip, port, payload)
-        count += 1
-        if repeat and count >= repeat:
-            break
-        if interval > 0:
-            time.sleep(interval)
+
+    try:
+        while True:
+            send_payload(sock, ip, port, payload)
+            count += 1
+            if repeat and count >= repeat:
+                break
+            if interval > 0:
+                time.sleep(interval)
+    except KeyboardInterrupt:
+        print(f"\nInterrupted after {count} packet(s).")
 
 
 def _prompt_int(prompt: str, default: int, minimum: int | None = None) -> int:
@@ -189,20 +229,35 @@ def _cycle_presets(
     while loops == 0 or iteration < loops:
         iteration += 1
         for state_name in preset_order:
-            temp_args = SimpleNamespace(state=state_name, count=None, phone=False, no_phone=False, text=None)
-            payload = build_payload(temp_args)
+            temp_args = SimpleNamespace(
+                preset=state_name,
+                state=None,
+                people=None,
+                phone=False,
+                no_phone=False,
+                prompt=None,
+                mist=220,
+                fan=100,
+                fire_intensity=0.5,
+                palette=None,
+                pulse=False,
+                celebration=False,
+            )
+            payload = build_v2_1_payload(temp_args)
             _send_with_repetition(sock, ip, port, payload, repeat, rate)
 
 
 def run_manual_mode(args: argparse.Namespace) -> None:
-    payload = build_payload(args)
+    """Send a single packet or repeated packets."""
+    payload = build_v2_1_payload(args)
+
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         _send_with_repetition(sock, args.ip, args.port, payload, args.repeat, args.rate)
 
 
 def run_interactive(args: argparse.Namespace) -> None:
-    preset_order = list(PRESETS.keys())
+    """Interactive mode with menu."""
     ip = args.ip
     port = args.port
     repeat = args.repeat if args.repeat >= 0 else 1
@@ -210,112 +265,168 @@ def run_interactive(args: argparse.Namespace) -> None:
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
         while True:
-            print("\n=== Bond Fire Packet CLI ===")
-            repeat_label = "∞" if repeat == 0 else str(repeat)
-            print(f"Target: {ip}:{port} | Repeat: {repeat_label} | Rate: {rate:.2f} msg/s")
-            for idx, name in enumerate(preset_order, start=1):
-                count, phone, override_text = PRESETS[name]
-                text_sample = override_text or PROMPTS[min(count, 5)]
-                phone_flag = "phone" if phone else "no phone"
-                print(f"  {idx}) {name.title():<10} c={count} | {phone_flag} | {text_sample}")
-            print("  c) Custom payload")
-            print("  a) Cycle through presets")
+            print("\n" + "=" * 50)
+            print("Bond Fire v2.1 Packet Sender")
+            print("=" * 50)
+            print(f"Target: {ip}:{port} | Repeat: {repeat if repeat else '∞'} | Rate: {rate:.1f} msg/s\n")
+
+            # Show presets
+            for idx, (name, (state, people, phone, prompt)) in enumerate(PRESETS.items(), 1):
+                phone_str = "📱" if phone else ""
+                print(f"  {idx}) {name.title():<12} [{state:<6}] {people} people {phone_str} | {prompt[:35]}")
+
+            print("\n  c) Custom payload")
+            print("  a) Auto-cycle presets")
             print("  r) Set repeat count")
-            print("  f) Set rate (messages per second)")
-            print("  t) Change target (IP/port)")
-            print("  q) Quit")
+            print("  f) Set rate (msg/sec)")
+            print("  t) Change target IP/port")
+            print("  q) Quit\n")
 
             try:
                 choice = input("Select option> ").strip().lower()
-            except EOFError:
-                print("\nExiting interactive mode.")
+            except (EOFError, KeyboardInterrupt):
+                print("\nExiting.")
                 return
 
             if not choice:
                 continue
+
             if choice in {"q", "quit", "exit"}:
-                print("Exiting interactive mode.")
                 return
 
+            # Preset selection
             if choice.isdigit():
-                index = int(choice) - 1
-                if 0 <= index < len(preset_order):
-                    state_name = preset_order[index]
-                    temp_args = SimpleNamespace(state=state_name, count=None, phone=False, no_phone=False, text=None)
-                    payload = build_payload(temp_args)
+                idx = int(choice) - 1
+                preset_list = list(PRESETS.keys())
+                if 0 <= idx < len(preset_list):
+                    preset_name = preset_list[idx]
+                    temp_args = SimpleNamespace(
+                        preset=preset_name,
+                        state=None,
+                        people=None,
+                        phone=False,
+                        no_phone=False,
+                        prompt=None,
+                        mist=220,
+                        fan=100,
+                        fire_intensity=0.5,
+                        palette=None,
+                        pulse=False,
+                        celebration=False,
+                    )
+                    payload = build_v2_1_payload(temp_args)
                     try:
                         _send_with_repetition(sock, ip, port, payload, repeat, rate)
-                    except ValueError as exc:
-                        print(f"Error: {exc}")
+                    except ValueError as e:
+                        print(f"Error: {e}")
                 else:
-                    print("Unknown option. Try again.")
-                continue
+                    print("Invalid selection.")
 
-            if choice in {"c", "custom"}:
-                custom_count = _prompt_int("People count (c)", 0, minimum=0)
-                custom_phone = _prompt_bool("Phone detected?", False)
-                text_input = input("Text override (leave blank for auto): ").strip()
-                text_value = text_input if text_input else None
-                custom_args = SimpleNamespace(state=None, count=custom_count, phone=custom_phone, no_phone=False, text=text_value)
-                if not text_value:
-                    custom_args.text = PROMPTS[min(custom_count, 5)]
-                payload = build_payload(custom_args)
+            elif choice == "c":
+                # Custom payload
+                print("\nCustom Payload Builder:")
                 try:
+                    state = input(f"State [{STATE_NAMES[1]}]: ").strip() or STATE_NAMES[1]
+                    if state not in STATE_NAMES:
+                        print(f"Invalid state. Must be one of {STATE_NAMES}")
+                        continue
+
+                    people_input = input("People count [0]: ").strip()
+                    people = int(people_input) if people_input else 0
+                    people = max(0, min(6, people))
+
+                    phone = input("Phone detected? (y/n) [n]: ").strip().lower() in {"y", "yes"}
+
+                    prompt = input("Prompt text [Custom message]: ").strip() or "Custom message"
+
+                    temp_args = SimpleNamespace(
+                        preset=None,
+                        state=state,
+                        people=people,
+                        phone=phone,
+                        no_phone=False,
+                        prompt=prompt,
+                        mist=220,
+                        fan=100,
+                        fire_intensity=0.5,
+                        palette=None,
+                        pulse=False,
+                        celebration=False,
+                    )
+                    payload = build_v2_1_payload(temp_args)
                     _send_with_repetition(sock, ip, port, payload, repeat, rate)
-                except ValueError as exc:
-                    print(f"Error: {exc}")
-                continue
+                except (ValueError, KeyboardInterrupt) as e:
+                    print(f"Error: {e}")
 
-            if choice in {"a", "cycle"}:
-                loops = _prompt_int("How many times to cycle through presets? (0 = continuous)", 1, minimum=0)
+            elif choice == "a":
+                # Auto-cycle presets
                 try:
-                    _cycle_presets(sock, ip, port, repeat, rate, loops, preset_order)
-                except ValueError as exc:
-                    print(f"Error: {exc}")
+                    loops = int(input("Number of loops (0=infinite) [1]: ").strip() or "1")
+                    preset_list = list(PRESETS.keys())
+                    iteration = 0
+                    while loops == 0 or iteration < loops:
+                        iteration += 1
+                        for preset_name in preset_list:
+                            temp_args = SimpleNamespace(
+                                preset=preset_name,
+                                state=None,
+                                people=None,
+                                phone=False,
+                                no_phone=False,
+                                prompt=None,
+                                mist=220,
+                                fan=100,
+                                fire_intensity=0.5,
+                                palette=None,
+                                pulse=False,
+                                celebration=False,
+                            )
+                            payload = build_v2_1_payload(temp_args)
+                            send_payload(sock, ip, port, payload)
+                            time.sleep(1.0 / rate if rate > 0 else 1.0)
                 except KeyboardInterrupt:
-                    print("\nCycle interrupted.")
-                continue
+                    print("Interrupted.")
 
-            if choice in {"r", "repeat"}:
-                repeat = _prompt_int("Repeat count for each send (0 = continuous)", repeat, minimum=0)
-                continue
+            elif choice == "r":
+                try:
+                    repeat = int(input("Repeat count (0=infinite) [1]: ").strip() or "1")
+                except ValueError:
+                    print("Invalid number.")
 
-            if choice in {"f", "rate"}:
-                rate = _prompt_float("Messages per second", rate, minimum=0.0)
-                continue
+            elif choice == "f":
+                try:
+                    rate = float(input("Rate (msg/sec) [1.0]: ").strip() or "1.0")
+                    if rate <= 0:
+                        print("Rate must be positive.")
+                        rate = 1.0
+                except ValueError:
+                    print("Invalid number.")
 
-            if choice in {"t", "target"}:
-                ip = _prompt_ip(ip)
-                port = _prompt_port(port)
-                continue
-
-            print("Unknown option. Try again.")
+            elif choice == "t":
+                try:
+                    new_ip = input(f"IP address [{ip}]: ").strip() or ip
+                    socket.inet_aton(new_ip)
+                    ip = new_ip
+                    new_port = input(f"Port [{port}]: ").strip()
+                    if new_port:
+                        port = int(new_port)
+                    print(f"Target updated: {ip}:{port}")
+                except (OSError, ValueError) as e:
+                    print(f"Invalid: {e}")
 
 
 def main() -> None:
     args = parse_args()
-    launch_interactive = args.interactive
-    if not launch_interactive:
-        no_manual_overrides = (
-            args.state is None
-            and args.count is None
-            and not args.phone
-            and not args.no_phone
-            and args.text is None
-        )
-        if no_manual_overrides:
-            launch_interactive = True
 
-    if launch_interactive:
+    if args.interactive:
         run_interactive(args)
-        return
-
-    try:
+    else:
+        if not args.preset and not args.state:
+            print("Error: Must specify either a preset or --state")
+            sys.exit(1)
         run_manual_mode(args)
-    except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

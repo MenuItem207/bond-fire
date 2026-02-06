@@ -62,7 +62,7 @@ The installation operates on a **0-100% social battery scale**. Every person add
 
         ANY STATE ──→ PHONE (phone detected)
         Instant trigger, 0.5s exit hysteresis
-        Mist: CUTS, LEDs: Static Grey
+        Mist: CUTS, LEDs: Red Glitch (penalty effect)
         "DISCONNECT TO CONNECT"
         └─ Phone removed for 0.5s → Previous State + Celebration
 ```
@@ -74,7 +74,7 @@ The installation operates on a **0-100% social battery scale**. Every person add
 | **IDLE**  | 0      | 0%      | OFF  | Low  | Breathing Blue | Lure       |
 | **FIRE**  | 1-4    | 20-80%  | Ramp | Ramp | Orange → Red   | Nudge      |
 | **PARTY** | 5+     | 100%    | MAX  | MAX  | Rainbow        | Celebrate  |
-| **PHONE** | Any    | -       | 0%   | -    | Static Grey    | Alert      |
+| **PHONE** | Any    | -       | 0%   | -    | Red Glitch     | Alert      |
 
 ---
 

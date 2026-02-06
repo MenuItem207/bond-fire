@@ -73,7 +73,7 @@ class AudioManager:
     """
 
     # Default asset paths (relative to vision/assets/)
-    ASSETS_DIR = Path(__file__).parent.parent / "assets"
+    ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
     SFX_DIR = ASSETS_DIR / "sfx"
     MUSIC_DIR = ASSETS_DIR / "music"
 
@@ -160,6 +160,10 @@ class AudioManager:
                 self._tts_engine.setProperty("rate", cfg.audio.tts.speech_rate)  # Speech speed from config
                 self._tts_engine.setProperty("volume", self.master_volume)
                 self._configure_tts_voice()
+
+            # Create placeholder assets directory if missing
+            if not self.assets_dir.exists():
+                create_placeholder_assets(self.assets_dir)
 
             # Start worker thread
             self._thread = threading.Thread(target=self._worker, name="audio-worker", daemon=True)
