@@ -73,16 +73,16 @@
 
 ### **Key Principle: Python Decides WHAT, ESP32 Decides HOW**
 
-| Aspect | Python Master | ESP32 Slave |
-|--------|---------------|------------|
-| **State Machine** | ✅ Evaluates (IDLE→FIRE→PARTY) | ❌ Just receives |
-| **Color Analysis** | ✅ Extracts shirt colors | ❌ Just receives RGB |
-| **Prompt Generation** | ✅ Generates text | ❌ Just displays it |
-| **Audio Cues** | ✅ Triggers SFX/music | ❌ Uses audio_state hint |
-| **LED Effect Rendering** | ❌ Too heavy for Python | ✅ Renders in real-time |
-| **Animation Timing** | ❌ Can't guarantee ms precision | ✅ Hardware PWM timers |
-| **PWM Output** | ❌ Software PWM too noisy | ✅ Clean hardware PWM |
-| **Palette Interpolation** | ❌ Expensive every frame | ✅ Local FastLED blending |
+| Aspect                    | Python Master                  | ESP32 Slave              |
+| ------------------------- | ------------------------------ | ------------------------ |
+| **State Machine**         | ✅ Evaluates (IDLE→FIRE→PARTY)  | ❌ Just receives          |
+| **Color Analysis**        | ✅ Extracts shirt colors        | ❌ Just receives RGB      |
+| **Prompt Generation**     | ✅ Generates text               | ❌ Just displays it       |
+| **Audio Cues**            | ✅ Triggers SFX/music           | ❌ Uses audio_state hint  |
+| **LED Effect Rendering**  | ❌ Too heavy for Python         | ✅ Renders in real-time   |
+| **Animation Timing**      | ❌ Can't guarantee ms precision | ✅ Hardware PWM timers    |
+| **PWM Output**            | ❌ Software PWM too noisy       | ✅ Clean hardware PWM     |
+| **Palette Interpolation** | ❌ Expensive every frame        | ✅ Local FastLED blending |
 
 ---
 
@@ -189,15 +189,15 @@ fill_solid(leds, NUM_LEDS, CRGB(
 
 ## Timing Reference Table
 
-| Transition | Python Decision Time | ESP32 React Time | Total Latency |
-|---|---|---|---|
-| Person enters | ~30ms (next frame) | ~50ms (receive) | **80ms** |
-| Entry flash starts | — | ~80ms | **80ms** |
-| Person leaves (→IDLE) | 5.0s + 30ms | 50ms | **5.08s** |
-| Phone detected | ~30ms | ~50ms | **80ms** (instant!) |
-| Phone released (→FIRE) | 2.0s (dwell) + 30ms | 50ms | **2.08s** |
-| Build-up starts | 2.0s (party dwell) | 50ms | **2.05s** |
-| Supernova achieved | 2.0s + 1.5s build-up | 50ms | **3.55s** |
+| Transition             | Python Decision Time | ESP32 React Time | Total Latency       |
+| ---------------------- | -------------------- | ---------------- | ------------------- |
+| Person enters          | ~30ms (next frame)   | ~50ms (receive)  | **80ms**            |
+| Entry flash starts     | —                    | ~80ms            | **80ms**            |
+| Person leaves (→IDLE)  | 5.0s + 30ms          | 50ms             | **5.08s**           |
+| Phone detected         | ~30ms                | ~50ms            | **80ms** (instant!) |
+| Phone released (→FIRE) | 2.0s (dwell) + 30ms  | 50ms             | **2.08s**           |
+| Build-up starts        | 2.0s (party dwell)   | 50ms             | **2.05s**           |
+| Supernova achieved     | 2.0s + 1.5s build-up | 50ms             | **3.55s**           |
 
 ---
 
@@ -238,14 +238,14 @@ Every 33ms (30fps), Python sends this:
 
 ## Summary: Reactivity Profile
 
-| Event | Reaction Time | User Perception |
-|-------|---|---|
-| **New person enters** | 80ms | Instant! (imperceptible) |
-| **Person waves/moves** | 30ms per frame | Smooth real-time tracking |
-| **Phone comes out** | 80ms | Quick red alert |
-| **5th person arrives** | 3.55s total | Epic 1.5s build-up before fireworks |
-| **Person leaves briefly** | No reaction (5s hysteresis) | System stays "hot" |
-| **Everyone leaves** | 5.08s total | Graceful fade to idle |
+| Event                     | Reaction Time               | User Perception                     |
+| ------------------------- | --------------------------- | ----------------------------------- |
+| **New person enters**     | 80ms                        | Instant! (imperceptible)            |
+| **Person waves/moves**    | 30ms per frame              | Smooth real-time tracking           |
+| **Phone comes out**       | 80ms                        | Quick red alert                     |
+| **5th person arrives**    | 3.55s total                 | Epic 1.5s build-up before fireworks |
+| **Person leaves briefly** | No reaction (5s hysteresis) | System stays "hot"                  |
+| **Everyone leaves**       | 5.08s total                 | Graceful fade to idle               |
 
 **Bottom line:** Fast entry (80ms), slow exit (5s), epic build-up (1.5s). This is intentional for UX.
 

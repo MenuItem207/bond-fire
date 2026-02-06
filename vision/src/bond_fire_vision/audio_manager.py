@@ -14,6 +14,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from .config import get_config
+
 try:
     import pygame.mixer as mixer
 
@@ -92,29 +94,39 @@ class AudioManager:
     def __init__(
         self,
         enabled: bool = True,
-        master_volume: float = 0.7,
+        master_volume: Optional[float] = None,
         narration_enabled: bool = False,
         assets_dir: Optional[Path] = None,
+        tts_voice: Optional[str] = None,
     ) -> None:
         """
         Initialize audio manager.
 
         Args:
             enabled: Enable audio subsystem
-            master_volume: Master volume (0.0-1.0)
+            master_volume: Master volume (0.0-1.0). If None, uses config value
             narration_enabled: Enable TTS narration
             assets_dir: Override default assets directory
+            tts_voice: TTS voice to use ("male", "female", or specific voice name)
+                      Default: Auto-selects deep male voice
         """
+        # Load config
+        cfg = get_config()
+        
         self.enabled = enabled and PYGAME_AVAILABLE
+        # Use provided master_volume or fall back to config
+        if master_volume is None:
+            master_volume = cfg.audio.master_volume
         self.master_volume = max(0.0, min(1.0, master_volume))
         self.narration_enabled = narration_enabled and TTS_AVAILABLE
+        self.tts_voice = tts_voice
 
         if assets_dir:
             self.assets_dir = Path(assets_dir)
         else:
             self.assets_dir = self.ASSETS_DIR
 
-        self._queue: queue.Queue[AudioCommand] = queue.Queue(maxsize=20)
+        self._queue: queue.Queue[AudioCommand] = queue.Queue(maxsize=cfg.audio.audio_queue_size)
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._started = False
@@ -143,14 +155,19 @@ class AudioManager:
 
             # Initialize TTS if enabled
             if self.narration_enabled and TTS_AVAILABLE:
+                cfg = get_config()
                 self._tts_engine = pyttsx3.init()
-                self._tts_engine.setProperty("rate", 150)  # Speed
+                self._tts_engine.setProperty("rate", cfg.audio.tts.speech_rate)  # Speech speed from config
                 self._tts_engine.setProperty("volume", self.master_volume)
+                self._configure_tts_voice()
 
             # Start worker thread
             self._thread = threading.Thread(target=self._worker, name="audio-worker", daemon=True)
             self._thread.start()
             self._started = True
+
+            # Validate assets and warn about missing files
+            self._validate_assets()
 
             print(f"Audio system started (volume={self.master_volume:.1f}).", flush=True)
             if self.narration_enabled:
@@ -178,6 +195,111 @@ class AudioManager:
 
         self._started = False
 
+    def _validate_assets(self) -> None:
+        """Check for missing audio assets and print warnings."""
+        missing_assets = []
+        for asset_name, relative_path in self.ASSET_MAP.items():
+            asset_path = self.assets_dir / relative_path
+            if not asset_path.exists():
+                missing_assets.append((asset_name, asset_path))
+        
+        if missing_assets:
+            print("\n⚠️  WARNING: Missing audio assets:", flush=True)
+            for asset_name, path in missing_assets:
+                print(f"  - {asset_name}: {path}", flush=True)
+            print(f"\nExpected assets directory: {self.assets_dir}", flush=True)
+            print("See AUDIO_ASSETS.md for complete asset list and setup instructions.\n", flush=True)
+
+    def get_available_voices(self) -> list[str]:
+        """Get list of available TTS voices."""
+        if not TTS_AVAILABLE:
+            return []
+        try:
+            engine = pyttsx3.init()
+            voices = engine.getProperty("voices")
+            return [voice.name for voice in voices]
+        except Exception:
+            return []
+
+    def _configure_tts_voice(self) -> None:
+        """Configure TTS voice with preference for deep narrator voice."""
+        if not self._tts_engine:
+            return
+        
+        try:
+            voices = self._tts_engine.getProperty("voices")
+            if not voices:
+                print("⚠️  Warning: No TTS voices available", flush=True)
+                return
+            
+            selected_voice = None
+            
+            # If user specified a voice, try to find it
+            if self.tts_voice:
+                if self.tts_voice.lower() == "male":
+                    # Find best male voice
+                    preferred = ["david", "alex", "john", "james", "google uk english male"]
+                    for pref in preferred:
+                        for voice in voices:
+                            if pref in voice.name.lower():
+                                selected_voice = voice
+                                break
+                        if selected_voice:
+                            break
+                elif self.tts_voice.lower() == "female":
+                    # Find best female voice
+                    preferred = ["victoria", "samantha", "moira", "fiona", "google uk english female"]
+                    for pref in preferred:
+                        for voice in voices:
+                            if pref in voice.name.lower():
+                                selected_voice = voice
+                                break
+                        if selected_voice:
+                            break
+                else:
+                    # Try to find voice by ID or name substring
+                    for voice in voices:
+                        if self.tts_voice.lower() in voice.id.lower() or self.tts_voice.lower() in voice.name.lower():
+                            selected_voice = voice
+                            break
+            
+            # Default: Auto-select best deep male narrator voice (avoid "Albert")
+            if not selected_voice:
+                # Tier 1: Preferred professional/deep narrator voices
+                preferred_names = [
+                    "daniel",  # Professional British English (best narrator voice)
+                    "grandpa",  # Deeper/mature tone
+                    "rocko",   # High-quality eloquence
+                    "reed",    # Eloquence line
+                    "david", "alex", "john", "james", "google uk english male", "microsoft"
+                ]
+                for pref in preferred_names:
+                    for voice in voices:
+                        voice_name = voice.name.lower()
+                        if pref in voice_name and "albert" not in voice_name:
+                            selected_voice = voice
+                            break
+                    if selected_voice:
+                        break
+                
+                # Tier 2: Any male voice
+                if not selected_voice:
+                    for voice in voices:
+                        if "male" in voice.name.lower() and "albert" not in voice.name.lower():
+                            selected_voice = voice
+                            break
+                
+                # Tier 3: First available voice
+                if not selected_voice:
+                    selected_voice = voices[0]
+            
+            if selected_voice:
+                self._tts_engine.setProperty("voice", selected_voice.id)
+                print(f"TTS voice: {selected_voice.name}", flush=True)
+        
+        except Exception as exc:
+            print(f"TTS voice configuration error: {exc}", flush=True)
+
     def play_sfx(self, asset_name: str, volume: float = 1.0) -> None:
         """
         Play a sound effect (non-blocking).
@@ -199,7 +321,7 @@ class AudioManager:
                 )
             )
         except queue.Full:
-            pass  # Drop if queue full
+            print(f"⚠️  Audio queue full, dropping SFX: {asset_name}", flush=True)
 
     def play_music(self, asset_name: str, loop: bool = True, volume: float = 0.7) -> None:
         """
@@ -251,7 +373,7 @@ class AudioManager:
                 AudioCommand(action="play", channel=AudioChannel.NARRATION, asset_name=text)
             )
         except queue.Full:
-            pass
+            print(f"⚠️  Audio queue full, dropping narration", flush=True)
 
     def set_state(self, state: AudioState) -> None:
         """
@@ -290,40 +412,75 @@ class AudioManager:
 
     def _handle_play(self, cmd: AudioCommand) -> None:
         """Handle play command."""
-        if cmd.channel == AudioChannel.NARRATION and self._tts_engine:
-            # TTS narration
+        if cmd.channel == AudioChannel.NARRATION:
+            # TTS narration - use fresh engine instance for each utterance to avoid blocking
+            if not TTS_AVAILABLE:
+                return
+            
             try:
-                self._tts_engine.say(cmd.asset_name)
-                self._tts_engine.runAndWait()
+                # Create a fresh TTS engine for this utterance
+                # This prevents the engine from getting stuck after multiple calls
+                tts = pyttsx3.init()
+                tts.setProperty("rate", 150)  # Speech speed
+                tts.setProperty("volume", self.master_volume)
+                
+                # Apply saved voice preference if available
+                if self._tts_engine:
+                    try:
+                        current_voice = self._tts_engine.getProperty("voice")
+                        tts.setProperty("voice", current_voice)
+                    except Exception:
+                        pass  # Voice not available in fresh instance
+                
+                # Speak and wait for completion
+                tts.say(cmd.asset_name)
+                tts.runAndWait()
+                
+                # Clean up engine
+                try:
+                    del tts
+                except Exception:
+                    pass
             except Exception as exc:
                 print(f"TTS error: {exc}", flush=True)
             return
 
         # Load sound if not cached
         if cmd.asset_name not in self._loaded_sounds:
-            asset_path = self.assets_dir / self.ASSET_MAP.get(cmd.asset_name, cmd.asset_name)
+            relative_path = self.ASSET_MAP.get(cmd.asset_name, cmd.asset_name)
+            asset_path = self.assets_dir / relative_path
             if not asset_path.exists():
-                print(f"Audio asset not found: {asset_path}", flush=True)
+                # Only warn once per missing asset
+                if cmd.asset_name not in self._loaded_sounds:
+                    print(f"⚠️  Audio asset missing: '{cmd.asset_name}' at {asset_path}", flush=True)
+                    self._loaded_sounds[cmd.asset_name] = None  # Mark as attempted
                 return
 
             try:
                 self._loaded_sounds[cmd.asset_name] = mixer.Sound(str(asset_path))
             except Exception as exc:
-                print(f"Failed to load {asset_path}: {exc}", flush=True)
+                print(f"❌ Failed to load audio '{cmd.asset_name}': {exc}", flush=True)
+                self._loaded_sounds[cmd.asset_name] = None  # Mark as failed
                 return
 
-        sound = self._loaded_sounds[cmd.asset_name]
+        sound = self._loaded_sounds.get(cmd.asset_name)
+        if sound is None:
+            return  # Asset failed to load previously
         volume = cmd.volume * self.master_volume
 
         if cmd.channel == AudioChannel.MUSIC:
             # Use mixer.music for background tracks
-            asset_path = self.assets_dir / self.ASSET_MAP.get(cmd.asset_name, cmd.asset_name)
+            relative_path = self.ASSET_MAP.get(cmd.asset_name, cmd.asset_name)
+            asset_path = self.assets_dir / relative_path
+            if not asset_path.exists():
+                print(f"⚠️  Music asset missing: '{cmd.asset_name}' at {asset_path}", flush=True)
+                return
             try:
                 mixer.music.load(str(asset_path))
                 mixer.music.set_volume(volume)
                 mixer.music.play(loops=-1 if cmd.loop else 0)
             except Exception as exc:
-                print(f"Music playback error: {exc}", flush=True)
+                print(f"❌ Music playback error for '{cmd.asset_name}': {exc}", flush=True)
         else:
             # Use channels for SFX
             sound.set_volume(volume)

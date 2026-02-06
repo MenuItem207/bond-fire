@@ -84,6 +84,11 @@ def main() -> None:
         action="store_true",
         help="Enable TTS narration for prompts.",
     )
+    parser.add_argument(
+        "--tts-voice",
+        default=None,
+        help="TTS voice selection: 'male' (default deep narrator), 'female', or specific voice name.",
+    )
     
     # Legacy OpenAI parameters (kept for backward compatibility, ignored)
     parser.add_argument(
@@ -136,6 +141,7 @@ def main() -> None:
         enable_audio=args.enable_audio,
         audio_volume=args.audio_volume,
         narration_enabled=args.narration_enabled,
+        tts_voice=args.tts_voice,
     )
 
     try:

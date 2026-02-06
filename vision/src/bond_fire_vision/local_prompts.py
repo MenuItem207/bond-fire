@@ -11,6 +11,7 @@ import time
 from collections import deque
 from typing import Optional
 
+from .config import get_config
 from .state_machine import State
 
 
@@ -77,16 +78,26 @@ class LocalPromptGenerator:
     ]
 
     PHONE_PROMPTS = [
-        "Signal interference. Pocket that, bro.",
-        "Phones kill vibes. Disconnect to connect.",
-        "Put it away lah, we're here now.",
-        "Really? We're doing this?",
-        "The fire judges your screen time.",
-        "Device detected. Connection lost.",
-        "Screens down. Eyes up.",
-        "That rectangle won't save you.",
-        "Phone bad. Fire good.",
-        "Your feed can wait. We can't.",
+        "🚫 PHONE DETECTED. PUT IT AWAY!",
+        "📱 → 🔥 DISCONNECT TO CONNECT!",
+        "📵 FOCUS. THE FIRE WAITS FOR YOU.",
+        "☠️ PHONE KILLS THE VIBE. HELP US.",
+        "💔 YOU BROKE THE CIRCLE.",
+        "⚠️ SIGNAL INTERFERENCE DETECTED!",
+        "👀 EYES UP. SCREENS DOWN.",
+        "🎯 THIS IS MORE IMPORTANT THAN YOUR FEED!",
+        "🔥 > 📱 ALWAYS.",
+        "⏰ DISCONNECT NOW. CONNECT WITH US!",
+    ]
+
+    PHONE_EXIT_PROMPTS = [
+        "🎉 YES! WELCOME BACK TO THE FIRE!",
+        "✨ SMART CHOICE! LET'S BURN!",
+        "🔥 ATTENTION RESTORED. FIRE APPROVED!",
+        "🌟 NOW WE'RE TALKING!",
+        "💫 CONNECTION RESTORED. WITH THE FIRE!",
+        "🎊 THAT'S WHAT WE NEEDED!",
+        "👏 YOU DID IT! THE FIRE CELEBRATES YOU!",
     ]
 
     # Color-aware prompts (when multiple people have distinct colors)
@@ -98,17 +109,27 @@ class LocalPromptGenerator:
         "Different vibes, one flame.",
     ]
 
-    def __init__(self, history_size: int = 10, prompt_cooldown: float = 8.0) -> None:
+    def __init__(self, history_size: int = 10, prompt_cooldown: Optional[float] = None) -> None:
         """
         Initialize prompt generator.
 
         Args:
             history_size: Number of recent prompts to track for deduplication
-            prompt_cooldown: Minimum seconds between prompt changes (default: 8.0)
+            prompt_cooldown: Minimum seconds between prompt changes. If None, uses config value (default: 8.0)
         """
         self._history: deque[str] = deque(maxlen=history_size)
         self._color_prompt_enabled = False
-        self._prompt_cooldown = prompt_cooldown
+        
+        # Load cooldown timings from config if not provided
+        if prompt_cooldown is None:
+            cfg = get_config()
+            self._prompt_cooldown = cfg.prompts.normal_cooldown
+            self._phone_cooldown = cfg.prompts.phone_cooldown
+        else:
+            self._prompt_cooldown = prompt_cooldown
+            cfg = get_config()
+            self._phone_cooldown = cfg.prompts.phone_cooldown
+        
         self._current_prompt: Optional[str] = None
         self._last_prompt_time: float = 0.0
 
@@ -131,9 +152,12 @@ class LocalPromptGenerator:
         Returns:
             Prompt string (max 120 chars)
         """
-        # Check cooldown timer - return current prompt if not enough time has passed
+        # Check cooldown timer
         now = time.monotonic()
-        if self._current_prompt is not None and (now - self._last_prompt_time) < self._prompt_cooldown:
+        # Use shorter cooldown for PHONE state (2 sec) vs normal (8 sec)
+        active_cooldown = self._phone_cooldown if state == State.PHONE else self._prompt_cooldown
+        if (self._current_prompt is not None and 
+            (now - self._last_prompt_time) < active_cooldown):
             return self._current_prompt
         
         # Select prompt pool based on state
@@ -207,6 +231,15 @@ class LocalPromptGenerator:
 
         return random.choice(prompts)
 
+    def get_phone_exit_prompt(self) -> str:
+        """
+        Generate a celebratory prompt when phone is put away.
+
+        Returns:
+            Celebration prompt string
+        """
+        return random.choice(self.PHONE_EXIT_PROMPTS)
+
     def get_pulse_prompt(self, color_names: list[str]) -> str:
         """
         Generate a prompt for the periodic color pulse.
@@ -231,3 +264,8 @@ class LocalPromptGenerator:
     def clear_history(self) -> None:
         """Clear prompt history (useful for testing or reset)."""
         self._history.clear()
+
+    def force_regenerate(self) -> None:
+        """Force next prompt to regenerate by clearing cooldown timer."""
+        self._current_prompt = None
+        self._last_prompt_time = 0.0

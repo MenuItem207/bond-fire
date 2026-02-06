@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from .config import get_config
+
 
 class State(Enum):
     """Installation states."""
@@ -41,8 +43,7 @@ class StateOutput:
     pulse_active: bool
     entry_flash_id: Optional[int]
     party_buildup_progress: float = 0.0  # 0.0-1.0, progress towards full party
-    pulse_active: bool
-    entry_flash_id: Optional[int]
+    phone_just_exited: bool = False  # True when phone was just put away
 
 
 class StateMachine:
@@ -57,12 +58,10 @@ class StateMachine:
     - PHONE → previous: Phone absent for ≥2 seconds
     """
 
-    # Timing constants
+    # Timing constants - note: PHONE_ENTRY_DWELL and PHONE_EXIT_DWELL are loaded from config
     IDLE_TIMEOUT = 5.0  # Seconds with 0 people to enter IDLE (hysteresis)
     PARTY_DWELL = 2.0  # Seconds with ≥5 people to enter PARTY
     PARTY_EXIT_DWELL = 3.0  # Seconds with <4 people to exit PARTY
-    PHONE_ENTRY_DWELL = 0.0  # Seconds to detect phone (instant, no hysteresis)
-    PHONE_EXIT_DWELL = 2.0  # Seconds without phone to exit PHONE
     PARTY_ENTRY_BUILDUP = 1.5  # Seconds of light show build-up before full party
     PULSE_INTERVAL = 15.0  # Seconds between color pulses
     ENTRY_FLASH_DURATION = 3.0  # Seconds to flash new person's color
@@ -86,6 +85,11 @@ class StateMachine:
         self.previous_state = State.IDLE  # For PHONE exit
         self.PULSE_INTERVAL = pulse_interval
 
+        # Load phone detection timings from config
+        cfg = get_config()
+        self.PHONE_ENTRY_DWELL = cfg.state_machine.phone_entry_dwell
+        self.PHONE_EXIT_DWELL = cfg.state_machine.phone_exit_dwell
+
         # Timers
         self._state_enter_time = time.monotonic()
         self._idle_start: Optional[float] = None
@@ -100,6 +104,7 @@ class StateMachine:
         self._last_people_count = 0
         self._known_ids: set[int] = set()
         self._party_buildup_start: Optional[float] = None  # For supernova build-up effect
+        self._phone_just_exited = False  # Flag for phone exit celebration
 
     def update(self, context: StateContext, active_ids: Optional[set[int]] = None) -> StateOutput:
         """
@@ -128,17 +133,22 @@ class StateMachine:
         # PHONE state has highest priority (preempts everything)
         if phone:
             if self.state != State.PHONE:
+                print(f"📱 Phone detected! Entering PHONE state from {self.state.value}", flush=True)
                 self.previous_state = self.state
                 self._change_state(State.PHONE, now)
+                self._phone_just_exited = False
             self._phone_exit_start = None
         elif self.state == State.PHONE:
             # Phone just disappeared, start exit timer
             if self._phone_exit_start is None:
+                print(f"📱 Phone removed, starting {self.PHONE_EXIT_DWELL}s exit timer...", flush=True)
                 self._phone_exit_start = now
             elif now - self._phone_exit_start >= self.PHONE_EXIT_DWELL:
                 # Exit PHONE, return to previous state
+                print(f"📱 Phone exit complete (after {self.PHONE_EXIT_DWELL}s), returning to {self.previous_state.value}", flush=True)
                 self._change_state(self.previous_state, now)
                 self._phone_exit_start = None
+                self._phone_just_exited = True  # Flag celebration
 
         # Evaluate non-PHONE states
         if self.state != State.PHONE:
@@ -220,6 +230,11 @@ class StateMachine:
         
         output = self._calculate_output(people_count, pulse_active, entry_flash_id, party_buildup_progress)
 
+        # Reset phone exit flag after one frame
+        if self._phone_just_exited:
+            print(f"🎯 State machine setting phone_just_exited=True in output", flush=True)
+            self._phone_just_exited = False
+
         self._last_people_count = people_count
         return output
 
@@ -256,6 +271,7 @@ class StateMachine:
                 pulse_active=False,
                 entry_flash_id=None,
                 party_buildup_progress=0.0,
+                phone_just_exited=self._phone_just_exited,
             )
 
         elif self.state == State.FIRE:
@@ -276,6 +292,7 @@ class StateMachine:
                 pulse_active=pulse_active,
                 entry_flash_id=entry_flash_id,
                 party_buildup_progress=party_buildup_progress,
+                phone_just_exited=self._phone_just_exited,
             )
 
         elif self.state == State.PARTY:
@@ -287,6 +304,7 @@ class StateMachine:
                 pulse_active=False,  # Party has its own rainbow effect
                 entry_flash_id=None,
                 party_buildup_progress=0.0,
+                phone_just_exited=False,
             )
 
         elif self.state == State.PHONE:
@@ -298,6 +316,7 @@ class StateMachine:
                 pulse_active=False,
                 entry_flash_id=None,
                 party_buildup_progress=0.0,
+                phone_just_exited=self._phone_just_exited,
             )
 
         # Fallback (should never reach)
@@ -309,6 +328,7 @@ class StateMachine:
             pulse_active=False,
             entry_flash_id=None,
             party_buildup_progress=0.0,
+            phone_just_exited=False,
         )
 
     def get_time_in_state(self, now: float) -> float:

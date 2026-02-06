@@ -456,13 +456,13 @@ pio run -e esp32-wroom-32 -t upload
 
 ## Performance Targets
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| JSON parse time | <50ms | Using ArduinoJson streaming |
-| Effect render time | <10ms | Per-frame LED calculation |
-| PWM update | <1ms | ledcWrite() |
-| Total loop time | <100ms | 10+ fps animation headroom |
-| WiFi latency | <200ms | UDP roundtrip |
+| Metric             | Target | Measurement                 |
+| ------------------ | ------ | --------------------------- |
+| JSON parse time    | <50ms  | Using ArduinoJson streaming |
+| Effect render time | <10ms  | Per-frame LED calculation   |
+| PWM update         | <1ms   | ledcWrite()                 |
+| Total loop time    | <100ms | 10+ fps animation headroom  |
+| WiFi latency       | <200ms | UDP roundtrip               |
 
 ---
 

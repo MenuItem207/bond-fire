@@ -4,6 +4,7 @@ src/bond_fire_vision/__init__.py
 src/bond_fire_vision/audio_manager.py
 src/bond_fire_vision/cli.py
 src/bond_fire_vision/color_analysis.py
+src/bond_fire_vision/config.py
 src/bond_fire_vision/detector.py
 src/bond_fire_vision/local_prompts.py
 src/bond_fire_vision/packet_builder.py

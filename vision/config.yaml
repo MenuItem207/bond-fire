@@ -1,0 +1,50 @@
+# Bond Fire Vision Configuration
+# Adjust these values without modifying code
+
+# State Machine - Phone Detection Thresholds (seconds)
+state_machine:
+  phone_entry_dwell: 1.0      # Instant phone detection (no debounce on entry)
+  phone_exit_dwell: 0.5       # Hysteresis - phone must be absent for this duration to exit PHONE state
+  frame_rate: 5               # FPS for celebration display and state timing
+
+# Prompt Generation - Cooldown Durations (seconds)
+prompts:
+  normal_cooldown: 10          # Minimum time between prompts in non-phone states
+  phone_cooldown: 10           # Minimum time between prompts while phone is detected (faster)
+  
+# Celebration Effect - Phone Exit Celebration
+celebration:
+  duration_frames: 10         # Number of frames to display celebration (at frame_rate fps ≈ 2 seconds)
+  # celebration audio (party horn) plays automatically with state change
+  
+# Audio System
+audio:
+  master_volume: 0.7          # 0.0 to 1.0
+  sfx_volume: 0.8             # Sound effects volume multiplier
+  music_volume: 0.5           # Background music volume multiplier
+  
+  # TTS (Text-to-Speech) Configuration
+  tts:
+    enabled: true
+    speech_rate: 140          # WPM (words per minute) - lower = slower, higher = faster
+    voice_preference:         # Order of voice selection on macOS
+      - daniel                # British English narrator (primary)
+      - grandpa               # Male narrator alternative
+      - rocko                 # Another male option
+      - reed                  # Additional fallback
+  
+  # Queue Configuration
+  audio_queue_size: 50        # Max pending audio commands
+  worker_thread_enabled: true # Use background thread for audio playback
+
+# Vision Detection
+vision:
+  confidence_threshold: 0.5   # YOLO detection confidence (0.0 to 1.0)
+  person_class_id: 0          # COCO dataset person class
+  phone_class_id: 67          # COCO dataset cell phone class
+
+# Development/Debugging
+debug:
+  verbose_logging: false      # Print detailed state transitions and audio events
+  log_prompts: false          # Log all generated prompts
+  disable_tts: false          # Disable speech synthesis (audio still works for SFX/music)

@@ -48,6 +48,7 @@ class BondFireVision:
         enable_audio: bool = False,
         audio_volume: float = 0.7,
         narration_enabled: bool = False,
+        tts_voice: Optional[str] = None,
         # Legacy parameters (ignored, kept for compatibility)
         ai_enabled: bool = False,
         ai_interval: float = 5.0,
@@ -96,6 +97,7 @@ class BondFireVision:
                 enabled=True,
                 master_volume=audio_volume,
                 narration_enabled=narration_enabled,
+                tts_voice=tts_voice,
             )
 
         # Tracking state
@@ -104,6 +106,10 @@ class BondFireVision:
         self._last_entry_id: Optional[int] = None
         self._party_buildup_started = False
         self._last_buildup_step = 0
+        self._celebration_frames_remaining = 0  # Track celebration visibility (10 frames = ~2 sec @ 5fps)
+        self._celebration_prompt: Optional[str] = None  # Store celebration prompt to avoid toggling
+        self._latest_state_output: Optional[Any] = None  # Cache latest state output for packet building
+        self._last_narrated_prompt: Optional[str] = None  # Track last narrated prompt to avoid repeats
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -254,6 +260,9 @@ class BondFireVision:
         )
         active_ids = {p.id for p in people_in_roi}
         state_output = self.state_machine.update(context, active_ids)
+        
+        # Cache state output for packet building in _send_update
+        self._latest_state_output = state_output
 
         # Store people for packet building
         self._tracked_people = {p.id: p for p in people_in_roi}
@@ -320,12 +329,11 @@ class BondFireVision:
 
     def _send_update(self, sock: socket.socket, timestamp: float) -> None:
         """Build and send v2.1 packet."""
-        # Get current state output
-        state_output = self.state_machine._calculate_output(
-            len(self._tracked_people),
-            False,  # pulse_active is tracked in state machine
-            self.state_machine._entry_flash_id,
-        )
+        # Use cached state output from analyze_frame (preserves phone_just_exited flag)
+        if self._latest_state_output is None:
+            return  # No frame analyzed yet
+        
+        state_output = self._latest_state_output
 
         # Get people list
         people = list(self._tracked_people.values())
@@ -347,16 +355,42 @@ class BondFireVision:
             timestamp=timestamp,
         )
         
+        # Debug: Log state output flags
+        if state_output.phone_just_exited:
+            print(f"📥 Detector received phone_just_exited=True", flush=True)
+        
+        # Handle phone exit celebration
+        celebration_prompt = None
+        if state_output.phone_just_exited:
+            # Phone was just removed - celebrate! Show for 10 frames (~2 sec @ 5fps)
+            # Clear any cached prompts so we don't show stale PHONE prompts after celebration
+            self.prompt_generator.force_regenerate()
+            self._celebration_prompt = self.prompt_generator.get_phone_exit_prompt()
+            celebration_prompt = self._celebration_prompt
+            self._celebration_frames_remaining = 10
+            print(f"🎉 CELEBRATION! Phone removed: '{celebration_prompt}'", flush=True)
+            if self.audio_manager:
+                self.audio_manager.play_sfx("party_horn", volume=0.8)
+        elif self._celebration_frames_remaining > 0:
+            # Still in celebration phase - reuse same celebration prompt
+            self._celebration_frames_remaining -= 1
+            celebration_prompt = self._celebration_prompt
+            print(f"  🎊 Celebration frame {10 - self._celebration_frames_remaining}/10", flush=True)
+        else:
+            # Celebration ended, clear stored prompt
+            self._celebration_prompt = None
+        
+        # Use celebration prompt if in celebration mode, otherwise normal logic
+        if celebration_prompt is not None:
+            prompt = celebration_prompt
         # Handle entry flash and prompts
-        if state_output.entry_flash_id and state_output.entry_flash_id != self._last_entry_id:
+        elif state_output.entry_flash_id and state_output.entry_flash_id != self._last_entry_id:
             # New person entry
             person = self._tracked_people.get(state_output.entry_flash_id)
             if person:
                 prompt = self.prompt_generator.get_entry_prompt(person.shirt_name)
                 if self.audio_manager:
                     self.audio_manager.play_sfx("whoosh", volume=0.8)
-                    if self.audio_manager.narration_enabled:
-                        self.audio_manager.speak(prompt)
             else:
                 prompt = self.prompt_generator.generate(
                     state_output.state,
@@ -379,6 +413,12 @@ class BondFireVision:
                 len(set(p.shirt_rgb for p in people)),
                 colors_contrasting,
             )
+
+        # Narrate ALL prompts when they change
+        if self.audio_manager and self.audio_manager.narration_enabled:
+            if prompt != self._last_narrated_prompt:
+                self.audio_manager.speak(prompt)
+                self._last_narrated_prompt = prompt
 
         # Determine audio state
         audio_state = self._map_audio_state(state_output.state)
@@ -404,6 +444,7 @@ class BondFireVision:
             self._last_buildup_step = buildup_step
 
         # Build packet
+        is_celebrating = state_output.phone_just_exited or self._celebration_frames_remaining > 0
         packet = self.packet_builder.build(
             state=state_output.state,
             people=people,
@@ -416,6 +457,7 @@ class BondFireVision:
             entry_flash_id=state_output.entry_flash_id,
             audio_state=audio_state,
             party_buildup_progress=state_output.party_buildup_progress,
+            celebration=is_celebrating,
         )
 
         # Send packet

@@ -29,15 +29,15 @@
 
 All 7 Python modules are fully implemented AND integrated:
 
-| Module | Status | Integration |
-|--------|--------|-------------|
-| `state_machine.py` | ✅ Complete | Provides state + buildup_progress to detector |
-| `detector.py` | ✅ Complete | Triggers audio based on buildup_progress |
-| `color_analysis.py` | ✅ Complete | Extracts colors for LED palettes |
-| `local_prompts.py` | ✅ Complete | Generates state-aware text (8s cooldown) |
-| `audio_manager.py` | ✅ Complete | Plays SFX/music in background thread |
-| `packet_builder.py` | ✅ Complete | Includes buildup_progress in UDP packets |
-| `cli.py` | ✅ Complete | Accepts audio flags (--enable-audio, --audio-volume) |
+| Module              | Status     | Integration                                          |
+| ------------------- | ---------- | ---------------------------------------------------- |
+| `state_machine.py`  | ✅ Complete | Provides state + buildup_progress to detector        |
+| `detector.py`       | ✅ Complete | Triggers audio based on buildup_progress             |
+| `color_analysis.py` | ✅ Complete | Extracts colors for LED palettes                     |
+| `local_prompts.py`  | ✅ Complete | Generates state-aware text (8s cooldown)             |
+| `audio_manager.py`  | ✅ Complete | Plays SFX/music in background thread                 |
+| `packet_builder.py` | ✅ Complete | Includes buildup_progress in UDP packets             |
+| `cli.py`            | ✅ Complete | Accepts audio flags (--enable-audio, --audio-volume) |
 
 **Key Integration Point:**
 ```python
@@ -314,17 +314,17 @@ If all checked: **Everything is working!**
 
 ## Summary
 
-| Feature | Status | Location |
-|---------|--------|----------|
-| Build-up audio SFX | ✅ Implemented | detector.py L350-365 |
-| Build-up progress tracking | ✅ Implemented | state_machine.py |
-| Audio playback threading | ✅ Implemented | audio_manager.py |
-| SFX asset mapping | ✅ Implemented | audio_manager.py ASSET_MAP |
-| Python state machine | ✅ Implemented | state_machine.py |
-| Color analysis | ✅ Implemented | color_analysis.py |
-| Packet building w/ buildup | ✅ Implemented | packet_builder.py |
-| UDP broadcast | ✅ Implemented | detector.py |
-| CLI flags | ✅ Implemented | cli.py |
+| Feature                    | Status        | Location                   |
+| -------------------------- | ------------- | -------------------------- |
+| Build-up audio SFX         | ✅ Implemented | detector.py L350-365       |
+| Build-up progress tracking | ✅ Implemented | state_machine.py           |
+| Audio playback threading   | ✅ Implemented | audio_manager.py           |
+| SFX asset mapping          | ✅ Implemented | audio_manager.py ASSET_MAP |
+| Python state machine       | ✅ Implemented | state_machine.py           |
+| Color analysis             | ✅ Implemented | color_analysis.py          |
+| Packet building w/ buildup | ✅ Implemented | packet_builder.py          |
+| UDP broadcast              | ✅ Implemented | detector.py                |
+| CLI flags                  | ✅ Implemented | cli.py                     |
 
 **Everything Python-side is DONE and INTEGRATED.**
 

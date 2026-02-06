@@ -13,21 +13,32 @@ The installation acts as a **Social Battery Charger**. The "fire" visualizes the
 
 ---
 
-### 🔌 Data Communication (UDP Protocol)
+### 🔌 Data Communication (UDP Protocol v2.1)
 
-The system uses a **One-Way UDP Broadcast**. The Mac (Brain) analyzes the scene and broadcasts a JSON packet to the ESP32 (Body) 30 times a second.
+The system uses a **One-Way UDP Broadcast**. The Mac (Brain) analyzes the scene and broadcasts a comprehensive JSON packet to the ESP32 (Body) 30 times a second.
 
-#### **The Packet Structure**
+**Note:** The original v1 protocol (simple 3-field format) has been superseded by v2.1, which includes state machine outputs, tracking data, audio context, and visual effects.
 
-The Mac sends a JSON object containing exactly three data points:
+#### **Current Packet Structure (v2.1)**
+
+The Mac sends a JSON object with hardware control, visual effects, and audio cues:
 
 ```json
 {
-  "c": 3,           // Count: Number of people detected (Integer)
-  "p": false,       // Phone: Is a phone visible? (Boolean)
-  "t": "Message"    // Text: Context-aware prompt to scroll (String)
+  "version": 2,
+  "state": "FIRE",
+  "people": [],
+  "phone_detected": false,
+  "dominant_palette": [255,0,0,...],
+  "prompt": "Context-aware message",
+  "mist_pwm": 180,
+  "fan_pwm": 100,
+  "pulse_active": false,
+  "entry_flash_id": null,
+  "audio_state": "AMBIENT",
+  "party_buildup_progress": 0.5,
+  "celebration": false
 }
-
 ```
 
 #### **Scenario Examples**

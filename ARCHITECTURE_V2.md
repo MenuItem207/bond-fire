@@ -56,12 +56,12 @@ Migration from "Hybrid Logic" (Python detection + ESP32 effects) to "Master/Slav
 
 ### State Definitions
 
-| State | Trigger | Exit | Visual | Audio | Hardware |
-|-------|---------|------|--------|-------|----------|
-| **IDLE** | 0 people for ≥2s | First person | Blue embers, slow breathing | Silence | Mist: 150, Fan: 60 |
-| **FIRE** | 1-4 people | Phone OR ≥5 people | Fire intensity scales with count, 15s color pulse, entry flash | Fire crackle (volume scales), ambient music | Mist: 180+(count×15), Fan: 100+(count×30) |
-| **PARTY** | ≥5 people for ≥2s | <4 people for 3s | Rainbow cycling through shirt colors, strobing | Party music, celebration SFX | Mist: 255, Fan: 255 |
-| **PHONE** | Any phone in ROI | Phone absent ≥2s | Red glitch palette, random pops | Buzzer SFX, snarky TTS | Mist: 150, Fan: 0 |
+| State     | Trigger           | Exit               | Visual                                                         | Audio                                       | Hardware                                  |
+| --------- | ----------------- | ------------------ | -------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------- |
+| **IDLE**  | 0 people for ≥2s  | First person       | Blue embers, slow breathing                                    | Silence                                     | Mist: 150, Fan: 60                        |
+| **FIRE**  | 1-4 people        | Phone OR ≥5 people | Fire intensity scales with count, 15s color pulse, entry flash | Fire crackle (volume scales), ambient music | Mist: 180+(count×15), Fan: 100+(count×30) |
+| **PARTY** | ≥5 people for ≥2s | <4 people for 3s   | Rainbow cycling through shirt colors, strobing                 | Party music, celebration SFX                | Mist: 255, Fan: 255                       |
+| **PHONE** | Any phone in ROI  | Phone absent ≥2s   | Red glitch palette, random pops                                | Buzzer SFX, snarky TTS                      | Mist: 150, Fan: 0                         |
 
 ### Fire Mode Behaviors (Main Mode)
 
@@ -121,25 +121,25 @@ mist_pwm = constrain(180 + (people_count * 15), 180, 255)
 
 ### Field Specifications
 
-| Field | Type | Required | Range/Format | Notes |
-|-------|------|----------|--------------|-------|
-| `version` | integer | ✓ | `2` | Protocol gate; ESP32 rejects if mismatch |
-| `timestamp` | float | ✓ | Unix epoch, monotonic | For ordering/interpolation |
-| `fps` | float | ✓ | 0.0–60.0 | Diagnostic; actual send rate |
-| `state` | string | ✓ | `IDLE`, `FIRE`, `PARTY`, `PHONE` | Current master state |
-| `people` | array | ✓ | Max 6 entries | Active tracked people |
-| `people[].id` | integer | ✓ | ≥0 | Stable YOLO track ID |
-| `people[].bbox` | array | ✓ | 4 floats, 0.0–1.0 | Normalized [x1,y1,x2,y2] |
-| `people[].shirt_rgb` | array | ✓ | 3 ints, 0–255 | Dominant color |
-| `people[].shirt_name` | string | ✓ | 1–24 chars | Human-readable color |
-| `phone_detected` | boolean | ✓ | — | Any phone in ROI |
-| `dominant_palette` | array | ✓ | 3–12 ints (RGB tuples) | Up to 4 colors for LED palette |
-| `prompt` | string | ✓ | ≤120 chars | Display text |
-| `mist_pwm` | integer | ✓ | 0–255 | Suggested mist level |
-| `fan_pwm` | integer | ✓ | 0–255 | Suggested fan level |
-| `pulse_active` | boolean | ✓ | — | True during 15s color pulse |
-| `entry_flash_id` | integer/null | ✓ | Track ID or `null` | Triggers entry flash animation |
-| `audio_state` | string | ✓ | `SILENT`, `AMBIENT`, `PARTY`, `ALERT` | Audio context hint |
+| Field                 | Type         | Required | Range/Format                          | Notes                                    |
+| --------------------- | ------------ | -------- | ------------------------------------- | ---------------------------------------- |
+| `version`             | integer      | ✓        | `2`                                   | Protocol gate; ESP32 rejects if mismatch |
+| `timestamp`           | float        | ✓        | Unix epoch, monotonic                 | For ordering/interpolation               |
+| `fps`                 | float        | ✓        | 0.0–60.0                              | Diagnostic; actual send rate             |
+| `state`               | string       | ✓        | `IDLE`, `FIRE`, `PARTY`, `PHONE`      | Current master state                     |
+| `people`              | array        | ✓        | Max 6 entries                         | Active tracked people                    |
+| `people[].id`         | integer      | ✓        | ≥0                                    | Stable YOLO track ID                     |
+| `people[].bbox`       | array        | ✓        | 4 floats, 0.0–1.0                     | Normalized [x1,y1,x2,y2]                 |
+| `people[].shirt_rgb`  | array        | ✓        | 3 ints, 0–255                         | Dominant color                           |
+| `people[].shirt_name` | string       | ✓        | 1–24 chars                            | Human-readable color                     |
+| `phone_detected`      | boolean      | ✓        | —                                     | Any phone in ROI                         |
+| `dominant_palette`    | array        | ✓        | 3–12 ints (RGB tuples)                | Up to 4 colors for LED palette           |
+| `prompt`              | string       | ✓        | ≤120 chars                            | Display text                             |
+| `mist_pwm`            | integer      | ✓        | 0–255                                 | Suggested mist level                     |
+| `fan_pwm`             | integer      | ✓        | 0–255                                 | Suggested fan level                      |
+| `pulse_active`        | boolean      | ✓        | —                                     | True during 15s color pulse              |
+| `entry_flash_id`      | integer/null | ✓        | Track ID or `null`                    | Triggers entry flash animation           |
+| `audio_state`         | string       | ✓        | `SILENT`, `AMBIENT`, `PARTY`, `ALERT` | Audio context hint                       |
 
 ---
 
@@ -169,15 +169,15 @@ vision/assets/
 ```
 
 ### Trigger Map
-| Event | SFX | Music | Narration |
-|-------|-----|-------|-----------|
-| IDLE entry | — | Stop all | — |
-| FIRE entry | Fire crackle (loop) | Ambient (loop) | — |
-| New person | Whoosh | — | "Welcome!" (optional) |
-| 15s pulse | Soft chime | — | — |
-| PARTY entry | Party horn | Party track | "Let's go!" |
-| PHONE detect | Buzzer | Stop music | Snarky TTS |
-| PHONE exit | — | Resume prior | — |
+| Event        | SFX                 | Music          | Narration             |
+| ------------ | ------------------- | -------------- | --------------------- |
+| IDLE entry   | —                   | Stop all       | —                     |
+| FIRE entry   | Fire crackle (loop) | Ambient (loop) | —                     |
+| New person   | Whoosh              | —              | "Welcome!" (optional) |
+| 15s pulse    | Soft chime          | —              | —                     |
+| PARTY entry  | Party horn          | Party track    | "Let's go!"           |
+| PHONE detect | Buzzer              | Stop music     | Snarky TTS            |
+| PHONE exit   | —                   | Resume prior   | —                     |
 
 ### Configuration
 - `--enable-audio`: Enable audio subsystem
@@ -327,15 +327,15 @@ vision/assets/
 
 ## Performance Targets
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| Packet Rate | 30 fps | Python: `time.monotonic()` delta |
-| Detection Latency | <50ms | YOLO inference time |
-| Color Extraction | <10ms | Per-person sampling time |
-| State Transition | <5ms | State machine evaluation |
-| Audio Queue Lag | <100ms | Queue depth monitoring |
-| ESP32 Parse Time | <15ms | `millis()` delta in loop |
-| LED Refresh | 30 fps | FastLED.show() frequency |
+| Metric            | Target | Measurement                      |
+| ----------------- | ------ | -------------------------------- |
+| Packet Rate       | 30 fps | Python: `time.monotonic()` delta |
+| Detection Latency | <50ms  | YOLO inference time              |
+| Color Extraction  | <10ms  | Per-person sampling time         |
+| State Transition  | <5ms   | State machine evaluation         |
+| Audio Queue Lag   | <100ms | Queue depth monitoring           |
+| ESP32 Parse Time  | <15ms  | `millis()` delta in loop         |
+| LED Refresh       | 30 fps | FastLED.show() frequency         |
 
 ---
 

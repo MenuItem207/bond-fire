@@ -1,0 +1,63 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                        BOND FIRE BUILD-UP AUDIO FLOW                         ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ HUMAN EVENT: 5 people gathered in ROI, standing still for >2 seconds         │
+└─────────────╔═══════════════════════════╀???                        BOND FIRE BUILD-UP AUDIO FLOW                         ║
+╚══════════════════════════════════════════════════??╚══════════════════════════? 
+┌──────────────────────────────────────────────────────────────────────────────?  │ HUMAN EVENT: 5 people gathered in ROI, standing still for >2 seconds         │
+└─────────────╔═══════════════════════════╀???                     ????─────────────╔════════════??╚══════════════════════════════════════════════════??╚══════════════════  ┌─────────────────────────────────────────────────────┐          ┌───────────────────┐
+│└─────────────╔═══════════════════════════╀???                     ????─────────────╔════════════??╚══════════════════════════? │└─────────────╔═══════════════════════════╀???                     ????─────────────╔════════════??╚══════════════════════════? │└─────────────╔═══════════════════════════╀???                     ????─────────────╔════════════??╚══════════════════════════? │└─────────└?───────────┘          └───────────────────┘
+    │                                  │                                  │
+    │                                  ↓                                  ↓
+    │         ┌─────────────────────────────────┐      ┌──────────────────────┐
+    │         │  🔊 "whoosh" PLAYS              │      │ ESP32 RECEIVES:      │
+    │         │  ~ 0.8 second rise              │      │ party_buildup_       │
+    │         │  Signals: Build-up beginning!   │      │ progress = 0.01      │
+    │         └─────────────────────────────────┘      │                      │
+    │                                                  │ Starts "charging"    │
+    │                                 │                                  │                                  │
+    │                   ?   │                                  ↓                                  ??    │         ┌────────────────────?E    │         │  🔊 "whoosh" PLAYS              │      │ ESP32 RECEIVES:      │
+    │         │  ~ 0.8 second rise              │      │ party_buildup_       │
+    │         ??   │         │  ~ 0.8 second rise              │      │ party_buildup_       │
+?   │         │  Signals: Build-up beginning!   │      │ progress = 0.01      ?r    │         └────???         │ buildup_step = 1 (was 0)        │
+    ?   │                                                  │ Starts "charging"    │
+    │                                 │                               │                                 │                                  │    ??   │                   ?   │                                  ↓                                  ??    ??    │         │  ~ 0.8 second rise              │      │ party_buildup_       │
+    │         ??   │         │  ~ 0.8 second rise              │      │ party_buildup_       │
+?   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        │         ??   │         │  ~ 0.8 second rise              │      │ party???   │         │  Signals: Build-up beginning!   │      │ progress = 0.01      ?r    │       ?   ?   │                                                  │ Starts "charging"    │
+    │                                 │                               │           │                                 │                               │             ?   │         ??   │         │  ~ 0.8 second rise              │      │ party_buildup_       │
+?   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        │         ??   │         │  ~ 0.8 second rise              │      │ party???   │         │  Signals: Build-up beginning!   │      │ progress = ???   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        │         ??       │                                 │                               │           │                                 │                               │             ?   │         ??   │         │  ~ 0.8 second rise              │      │ party_buildup_       │
+?   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        ???   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        │         ??   │         │  ~ 0.8 second rise              │      │ party???   │         │  Signals: Build-up beginning!   │      │ progress = ???   │         │  Sig???   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        ???   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        │         ??   │         │  ~ 0.8 second rise              │      │ party???   │         │  Signals: Build-up beginning!   │      │ progress = ???   │         │  Sig???   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        ???   │         │  Signals: Build-up beginning!   │      │ progress = 0.01        │         ??   │         │  ~ 0.8 second rise              │      │ party???              │
+             │ audio_state_changed = True      │
+             │ play_music("party_upbeat")      │
+             └─────────────────────────────────┘
+                              │
+                              ↓
+                    ┌─────────────────────────────┐
+                    │  🎵 PARTY MUSIC EXPLODES!   │
+                    │  Loud celebratory track     │
+                    │  Volume: 1.0 (maximum)      │
+                    │  Loop: True (continuous)    │
+                    └─────────────────────────────┘
+                              │
+                              ↓
+                    ┌─────────────────────────────┐
+                    │   ESP32 RECEIVES:           │
+                    ?            ?T             │ play_music("party_upbeat")      ?r             └───────────?                               │
+                              ↓
+                    ┌────────?                               ?                     ┌───                      │  🎵 PARTY MUSIC EXPLODES!   │
+                    │  Loud celebratory track     ?                     │  Loud celebratory track     │
+                      │  Volume: 1.0 (maximum)      ???──────────────────?                   └──────────?                               │
+                              ↓
+                    ┌───────??                             ?                     ┌───                      │   ESP32 RECEIVES:           │
+                    ?            ?T             │                       ?            ?T             ?                               ↓
+                    ┌────────?                               ?                     ┌───                      │ de     ??
+                    └─                    │  Loud celebratory track     ?                     │  Loud celebratory track     │
+                      │  Volume: 1.0 (maximum)      ???─?                      │  Volume: 1.0 (maximum)      ???─────────────────?                             ↓
+                    ┌───────??                             ?                     ┌───                      │   ESP32 RECEIVES:           ─?                   ┌───?                   ?            ?T             │                       ?            ?T             ?                               ↓
+                    (F                    ┌────────?                               ?                     ┌───                      │ de .0                    └─                    │  Loud celebratory track     ?                     │  Loud celebratory track     │
+             3.                      │  Volume: 1.0 (maximum)      ???─?                      │  Volume: 1.0 (maximum)      ???────C!                    ┌───────??                             ?                     ┌───                      │   ESP32 RECEIVES:           ─?                   ┌───?    ?                   (F                    ┌────────?                               ?                     ┌───                      │ de .0                    └─                    │  Loud celebratory track     ?                     │  Loud celebratory track     │
+             3.                      │  en             3.                      │  Volume: 1.0 (maximum)      ???─?                      │  Volume: 1.0 (maximum)      ???────C!                    ┌───────??                             ?                     ┌───                      │   ESP32 RECEIVEpe             3.                      │  en             3.                      │  Volume: 1.0 (maximum)      ???─?                      │  Volume: 1.0 (maximum)      ???────C!                    ┌───────??                             ?                     ┌───                      │   ESP32 RECEIVEpe             3.                      │  en             3.                      │  Volume: 1.0 (maximum)      ???─?                      │  Volume: 1.0 (maximum)      ???────C!                    ┌───────??                             ?                     ┌───         ion)
+PHONE_EXIT_DWELL         = 2.0s  (hysteresis when phone removed)
+

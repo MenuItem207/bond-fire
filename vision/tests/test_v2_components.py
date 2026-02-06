@@ -83,7 +83,7 @@ class TestStateMachine:
         assert sm.state == State.FIRE
 
     def test_fire_to_party_transition(self):
-        """Test transition from FIRE to PARTY at 5+ people."""
+        """Test transition from FIRE to PARTY at 5+ people (includes buildup time)."""
         sm = StateMachine()
         now = time.time()
 
@@ -96,8 +96,13 @@ class TestStateMachine:
         output = sm.update(context)
         assert output.state == State.FIRE  # Not yet, below dwell
 
-        # Exceed dwell time (2 seconds) - state machine tracks party_start_time internally
-        context = StateContext(people_count=5, phone_detected=False, timestamp=now + 3.5)
+        # At dwell time (2s) but before buildup completes (needs 1.5s more)
+        context = StateContext(people_count=5, phone_detected=False, timestamp=now + 3.0)
+        output = sm.update(context)
+        assert output.state == State.FIRE  # Still FIRE, in buildup phase
+
+        # Exceed dwell + buildup time (2 + 1.5 = 3.5 seconds)
+        context = StateContext(people_count=5, phone_detected=False, timestamp=now + 4.5)
         output = sm.update(context)
         assert output.state == State.PARTY
 
@@ -165,13 +170,13 @@ class TestLocalPrompts:
         assert len(prompt) <= 120
 
     def test_fire_prompts_by_count(self):
-        """Test FIRE prompts vary by people count."""
-        gen = LocalPromptGenerator()
+        """Test FIRE prompts vary by people count (with cooldown disabled)."""
+        gen = LocalPromptGenerator(prompt_cooldown=0.0)  # Disable cooldown for test
         p1 = gen.generate(State.FIRE, 1)
         p2 = gen.generate(State.FIRE, 2)
         p4 = gen.generate(State.FIRE, 4)
 
-        # Should be different prompts
+        # Should be different prompts (from different pools)
         assert p1 != p2
         assert p2 != p4
 
@@ -197,15 +202,15 @@ class TestLocalPrompts:
         assert len(prompt) > 0
 
     def test_prompt_history_prevents_repetition(self):
-        """Test that prompt history prevents rapid repetition."""
-        gen = LocalPromptGenerator(history_size=20)
+        """Test that prompt history prevents rapid repetition (without cooldown)."""
+        gen = LocalPromptGenerator(history_size=20, prompt_cooldown=0.0)  # Disable cooldown for test
         prompts = []
 
         for _ in range(5):
             prompt = gen.generate(State.IDLE, 0)
             prompts.append(prompt)
 
-        # Should have at least 2 different prompts
+        # Should have at least 2 different prompts (history dedup works)
         unique_prompts = set(prompts)
         assert len(unique_prompts) > 1
 
