@@ -6,7 +6,11 @@ Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: ultralytics
 Requires-Dist: opencv-python
-Requires-Dist: openai>=1.60.0
+Requires-Dist: numpy
+Requires-Dist: pygame>=2.0.0
+Requires-Dist: pyttsx3>=2.90
+Provides-Extra: legacy
+Requires-Dist: openai>=1.60.0; extra == "legacy"
 
 # Bond Fire Vision
 

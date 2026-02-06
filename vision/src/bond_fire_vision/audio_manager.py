@@ -82,6 +82,9 @@ class AudioManager:
         "buzzer": "sfx/buzzer_alert.mp3",
         "party_horn": "sfx/party_horn.mp3",
         "chime": "sfx/soft_chime.mp3",
+        "buildup_start": "sfx/buildup_start.mp3",  # Low tone to signal build-up beginning
+        "buildup_pulse": "sfx/buildup_pulse.mp3",  # Pulsing tone during build-up
+        "supernova": "sfx/supernova_burst.mp3",  # Explosion sound when party starts
         "ambient_music": "music/ambient_chill.mp3",
         "party_music": "music/party_upbeat.mp3",
     }

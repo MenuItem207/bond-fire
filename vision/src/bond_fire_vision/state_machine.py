@@ -40,6 +40,9 @@ class StateOutput:
     fire_intensity: float  # 0.0-1.0
     pulse_active: bool
     entry_flash_id: Optional[int]
+    party_buildup_progress: float = 0.0  # 0.0-1.0, progress towards full party
+    pulse_active: bool
+    entry_flash_id: Optional[int]
 
 
 class StateMachine:
@@ -55,10 +58,12 @@ class StateMachine:
     """
 
     # Timing constants
-    IDLE_TIMEOUT = 2.0  # Seconds with 0 people to enter IDLE
+    IDLE_TIMEOUT = 5.0  # Seconds with 0 people to enter IDLE (hysteresis)
     PARTY_DWELL = 2.0  # Seconds with ≥5 people to enter PARTY
     PARTY_EXIT_DWELL = 3.0  # Seconds with <4 people to exit PARTY
+    PHONE_ENTRY_DWELL = 0.0  # Seconds to detect phone (instant, no hysteresis)
     PHONE_EXIT_DWELL = 2.0  # Seconds without phone to exit PHONE
+    PARTY_ENTRY_BUILDUP = 1.5  # Seconds of light show build-up before full party
     PULSE_INTERVAL = 15.0  # Seconds between color pulses
     ENTRY_FLASH_DURATION = 3.0  # Seconds to flash new person's color
 
@@ -94,6 +99,7 @@ class StateMachine:
         # Tracking
         self._last_people_count = 0
         self._known_ids: set[int] = set()
+        self._party_buildup_start: Optional[float] = None  # For supernova build-up effect
 
     def update(self, context: StateContext, active_ids: Optional[set[int]] = None) -> StateOutput:
         """
@@ -155,9 +161,15 @@ class StateMachine:
                     if self._party_dwell_start is None:
                         self._party_dwell_start = now
                     elif now - self._party_dwell_start >= self.PARTY_DWELL:
-                        self._change_state(State.PARTY, now)
+                        # Start party buildup for light show effect
+                        if self._party_buildup_start is None:
+                            self._party_buildup_start = now
+                        elif now - self._party_buildup_start >= self.PARTY_ENTRY_BUILDUP:
+                            self._change_state(State.PARTY, now)
+                            self._party_buildup_start = None  # Reset for next time
                 else:
                     self._party_dwell_start = None
+                    self._party_buildup_start = None  # Reset if count drops
 
                 # Drop to IDLE if no people
                 if people_count == 0 and self._idle_start is not None:
@@ -200,7 +212,13 @@ class StateMachine:
             self._entry_flash_until = None
 
         # Calculate hardware outputs based on state
-        output = self._calculate_output(people_count, pulse_active, entry_flash_id)
+        party_buildup_progress = 0.0
+        if self._party_buildup_start is not None and self.state == State.FIRE and people_count >= 5:
+            # Calculate buildup progress (0.0 to 1.0 over PARTY_ENTRY_BUILDUP seconds)
+            elapsed = now - self._party_buildup_start
+            party_buildup_progress = min(1.0, elapsed / self.PARTY_ENTRY_BUILDUP)
+        
+        output = self._calculate_output(people_count, pulse_active, entry_flash_id, party_buildup_progress)
 
         self._last_people_count = people_count
         return output
@@ -226,6 +244,7 @@ class StateMachine:
         people_count: int,
         pulse_active: bool,
         entry_flash_id: Optional[int],
+        party_buildup_progress: float = 0.0,
     ) -> StateOutput:
         """Calculate hardware outputs for current state."""
         if self.state == State.IDLE:
@@ -236,6 +255,7 @@ class StateMachine:
                 fire_intensity=0.0,
                 pulse_active=False,
                 entry_flash_id=None,
+                party_buildup_progress=0.0,
             )
 
         elif self.state == State.FIRE:
@@ -255,6 +275,7 @@ class StateMachine:
                 fire_intensity=fire_intensity,
                 pulse_active=pulse_active,
                 entry_flash_id=entry_flash_id,
+                party_buildup_progress=party_buildup_progress,
             )
 
         elif self.state == State.PARTY:
@@ -265,6 +286,7 @@ class StateMachine:
                 fire_intensity=1.0,
                 pulse_active=False,  # Party has its own rainbow effect
                 entry_flash_id=None,
+                party_buildup_progress=0.0,
             )
 
         elif self.state == State.PHONE:
@@ -275,6 +297,7 @@ class StateMachine:
                 fire_intensity=0.0,
                 pulse_active=False,
                 entry_flash_id=None,
+                party_buildup_progress=0.0,
             )
 
         # Fallback (should never reach)
@@ -285,6 +308,7 @@ class StateMachine:
             fire_intensity=0.0,
             pulse_active=False,
             entry_flash_id=None,
+            party_buildup_progress=0.0,
         )
 
     def get_time_in_state(self, now: float) -> float:

@@ -7,6 +7,7 @@ Replaces OpenAI dependency with instant, deterministic text selection.
 from __future__ import annotations
 
 import random
+import time
 from collections import deque
 from typing import Optional
 
@@ -19,6 +20,7 @@ class LocalPromptGenerator:
 
     Maintains history to avoid repeating prompts in quick succession.
     Supports dynamic token replacement for personalization.
+    Includes cooldown timer to prevent prompts changing too rapidly.
     """
 
     # Prompt dictionaries by state
@@ -96,15 +98,19 @@ class LocalPromptGenerator:
         "Different vibes, one flame.",
     ]
 
-    def __init__(self, history_size: int = 10) -> None:
+    def __init__(self, history_size: int = 10, prompt_cooldown: float = 8.0) -> None:
         """
         Initialize prompt generator.
 
         Args:
             history_size: Number of recent prompts to track for deduplication
+            prompt_cooldown: Minimum seconds between prompt changes (default: 8.0)
         """
         self._history: deque[str] = deque(maxlen=history_size)
         self._color_prompt_enabled = False
+        self._prompt_cooldown = prompt_cooldown
+        self._current_prompt: Optional[str] = None
+        self._last_prompt_time: float = 0.0
 
     def generate(
         self,
@@ -125,6 +131,11 @@ class LocalPromptGenerator:
         Returns:
             Prompt string (max 120 chars)
         """
+        # Check cooldown timer - return current prompt if not enough time has passed
+        now = time.monotonic()
+        if self._current_prompt is not None and (now - self._last_prompt_time) < self._prompt_cooldown:
+            return self._current_prompt
+        
         # Select prompt pool based on state
         if state == State.IDLE:
             pool = self.IDLE_PROMPTS
@@ -162,6 +173,10 @@ class LocalPromptGenerator:
 
         # Add to history
         self._history.append(prompt)
+        
+        # Update cooldown tracking
+        self._current_prompt = prompt
+        self._last_prompt_time = now
 
         return prompt
 

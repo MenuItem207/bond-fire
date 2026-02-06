@@ -102,6 +102,8 @@ class BondFireVision:
         self._tracked_people: Dict[int, Person] = {}
         self._last_audio_state = AudioState.SILENT
         self._last_entry_id: Optional[int] = None
+        self._party_buildup_started = False
+        self._last_buildup_step = 0
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -277,11 +279,14 @@ class BondFireVision:
         cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
     def _is_inside_roi(self, box: tuple[float, float, float, float], roi_pixels: tuple[int, int, int, int]) -> bool:
+        """Check if bounding box center is in ROI with expanded tolerance."""
         x1, y1, x2, y2 = box
         roi_x1, roi_y1, roi_x2, roi_y2 = roi_pixels
+        # Use bbox center with expanded tolerance (25px margin) for edge cases
         cx = (x1 + x2) / 2
         cy = (y1 + y2) / 2
-        return roi_x1 < cx < roi_x2 and roi_y1 < cy < roi_y2
+        margin = 25  # pixels, for detecting people at ROI edges
+        return (roi_x1 - margin) < cx < (roi_x2 + margin) and (roi_y1 - margin) < cy < (roi_y2 + margin)
 
     def _roi_pixels(self, width: int, height: int) -> tuple[int, int, int, int]:
         rx1, ry1, rx2, ry2 = self.roi
@@ -378,10 +383,25 @@ class BondFireVision:
         # Determine audio state
         audio_state = self._map_audio_state(state_output.state)
         
-        # Trigger audio changes
+        # Trigger audio changes and build-up effects
         if audio_state != self._last_audio_state and self.audio_manager:
             self.audio_manager.set_state(audio_state)
             self._last_audio_state = audio_state
+        
+        # Trigger build-up audio when party buildup starts
+        if state_output.party_buildup_progress > 0.0 and not self._party_buildup_started:
+            if self.audio_manager:
+                self.audio_manager.play_sfx("buildup_start", volume=0.9)
+            self._party_buildup_started = True
+        elif state_output.party_buildup_progress == 0.0:
+            self._party_buildup_started = False
+        
+        # Trigger intermediate buildup SFX at key points (33%, 66%)
+        buildup_step = int(state_output.party_buildup_progress * 3)
+        if buildup_step > self._last_buildup_step:
+            if self.audio_manager and buildup_step in (1, 2):
+                self.audio_manager.play_sfx("buildup_pulse", volume=0.7)
+            self._last_buildup_step = buildup_step
 
         # Build packet
         packet = self.packet_builder.build(
@@ -395,6 +415,7 @@ class BondFireVision:
             pulse_active=state_output.pulse_active,
             entry_flash_id=state_output.entry_flash_id,
             audio_state=audio_state,
+            party_buildup_progress=state_output.party_buildup_progress,
         )
 
         # Send packet

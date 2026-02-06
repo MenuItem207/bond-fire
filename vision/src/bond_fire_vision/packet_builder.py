@@ -52,6 +52,7 @@ class PacketBuilderV2:
         pulse_active: bool = False,
         entry_flash_id: Optional[int] = None,
         audio_state: AudioState = AudioState.SILENT,
+        party_buildup_progress: float = 0.0,
     ) -> Dict[str, Any]:
         """
         Build a complete v2.1 packet.
@@ -67,6 +68,7 @@ class PacketBuilderV2:
             pulse_active: True during 15s color pulse
             entry_flash_id: Track ID for entry flash (or None)
             audio_state: Current audio state
+            party_buildup_progress: Party build-up progress (0.0-1.0)
 
         Returns:
             JSON-serializable dictionary
@@ -125,6 +127,7 @@ class PacketBuilderV2:
             "pulse_active": pulse_active,
             "entry_flash_id": entry_flash_id,
             "audio_state": audio_state.value,
+            "party_buildup_progress": round(party_buildup_progress, 2),
         }
 
         return packet
