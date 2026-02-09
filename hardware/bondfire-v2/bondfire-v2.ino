@@ -164,7 +164,7 @@ void setup() {
   Serial.println("[INIT] Initializing LED matrix...");
   matrixFront.begin();
   matrixFront.setTextWrap(false);
-  matrixFront.setBrightness(20);
+  matrixFront.setBrightness(35);
   matrixFront.setTextColor(matrixFront.Color(255, 0, 0));
   matrixFront.fillScreen(0);
   matrixFront.setCursor(0, 0);
@@ -674,6 +674,85 @@ void renderCelebrationEffect() {
 
 // ===== SECTION 8: MATRIX DISPLAY =====
 
+uint16_t matrixColorFromCRGB(const CRGB& color) {
+  return matrixFront.Color(color.r, color.g, color.b);
+}
+
+CRGB applyTextFlicker(CRGB base, uint8_t minScale, uint8_t maxScale) {
+  uint8_t scale = (maxScale < 255)
+    ? random8(minScale, (uint8_t)(maxScale + 1))
+    : random8(minScale, maxScale);
+  base.nscale8_video(scale);
+  return base;
+}
+
+CRGB getRingSampleColor() {
+  if (NUM_LEDS_RING == 0) {
+    return CRGB::Black;
+  }
+
+  uint16_t idxA = 0;
+  uint16_t idxB = NUM_LEDS_RING / 3;
+  uint16_t idxC = (NUM_LEDS_RING * 2) / 3;
+
+  CRGB sample = ringLeds[idxA];
+  sample += ringLeds[idxB];
+  sample += ringLeds[idxC];
+  sample.nscale8_video(85); // Average of 3 samples
+  return sample;
+}
+
+CRGB boostTextReadability(CRGB color, uint8_t minMaxChannel) {
+  uint8_t maxChannel = max(color.r, max(color.g, color.b));
+  if (maxChannel < 1) {
+    return color;
+  }
+  if (maxChannel < minMaxChannel) {
+    uint8_t scale = (uint8_t)((minMaxChannel * 255) / maxChannel);
+    color.nscale8_video(scale);
+  }
+  return color;
+}
+
+CRGB getMatrixFireTextColor() {
+  uint8_t heat = fireHeat[random8(NUM_LEDS_RING)];
+  uint8_t paletteIndex = scale8(heat, 240);
+  CRGB color = ColorFromPalette(firePalette, paletteIndex, 255, LINEARBLEND);
+  return color;
+}
+
+uint16_t getMatrixTextColor() {
+  CRGB ringSample = getRingSampleColor();
+  CRGB color = CRGB::Black;
+
+  switch (currentStateConfig.state) {
+    case STATE_IDLE: {
+      uint8_t glow = beatsin8(9, 50, 170);
+      color = CHSV(160, 180, glow);
+      break;
+    }
+    case STATE_FIRE:
+      color = CRGB(255, 120, 0);
+      break;
+    case STATE_PARTY: {
+      uint8_t hue = (uint8_t)(rainbowPhase * 255.0f);
+      color = CHSV(hue, 255, 255);
+      break;
+    }
+    case STATE_PHONE:
+      color = CRGB(160, 0, 0);
+      break;
+  }
+
+  // Subtle match to ring shade without introducing flicker.
+  color = blend(color, ringSample, 50);
+
+  // Keep text legible across states.
+  color = boostTextReadability(color, 170);
+
+  return matrixColorFromCRGB(color);
+}
+
 /**
  * Update the LED matrix with scrolling text
  * Migrated from working.ino matrix update logic
@@ -683,24 +762,8 @@ void updateMatrixDisplay() {
   matrixFront.fillScreen(0);
   matrixFront.setCursor(scrollX, 0);
 
-  // Set text color based on current state
-  uint16_t textColor = 0;
-  switch (currentStateConfig.state) {
-    case STATE_IDLE:
-      textColor = matrixFront.Color(120, 180, 255);  // Blue
-      break;
-    case STATE_FIRE:
-      textColor = matrixFront.Color(255, 100, 0);   // Orange
-      break;
-    case STATE_PARTY:
-      textColor = matrixFront.Color(255, 0, 255);   // Magenta
-      break;
-    case STATE_PHONE:
-      textColor = matrixFront.Color(200, 200, 200); // Grey
-      break;
-  }
-
-  matrixFront.setTextColor(textColor);
+  // Set text color to match ring state and apply fire-like flicker
+  matrixFront.setTextColor(getMatrixTextColor());
   matrixFront.print(scrollingText);
   matrixFront.show();
 
