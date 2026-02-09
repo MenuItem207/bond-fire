@@ -124,6 +124,13 @@ class BondFireVision:
         self._last_narrated_prompt: Optional[str] = None  # Track last narrated prompt to avoid repeats
         self._last_sent_prompt: Optional[str] = None  # Cache prompt to prevent unnecessary resets
         self._last_prompt_state: Optional[State] = None
+        self._entry_prompt_id: Optional[int] = None
+        self._entry_prompt_until: Optional[float] = None
+        self._entry_prompt: Optional[str] = None
+        self._pulse_prompt_until: Optional[float] = None
+        self._pulse_prompt: Optional[str] = None
+        self._pulse_prompt_duration = 2.0
+        self._pulse_active_last = False
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -400,28 +407,42 @@ class BondFireVision:
         if celebration_prompt is not None:
             prompt = celebration_prompt
         # Handle entry flash and prompts
-        elif state_output.entry_flash_id and state_output.entry_flash_id != self._last_entry_id:
-            # New person entry
-            person = self._tracked_people.get(state_output.entry_flash_id)
-            if person:
-                prompt = self.prompt_generator.get_entry_prompt(person.shirt_name)
-                if self.audio_manager:
-                    self.audio_manager.play_sfx("whoosh", volume=0.65)
-            else:
-                prompt = self.prompt_generator.generate(
-                    state_output.state,
-                    len(people),
-                    len(set(p.shirt_rgb for p in people)),
-                    colors_contrasting,
-                )
+        elif state_output.entry_flash_id:
+            if (
+                self._entry_prompt_id != state_output.entry_flash_id
+                or self._entry_prompt_until is None
+                or timestamp >= self._entry_prompt_until
+            ):
+                person = self._tracked_people.get(state_output.entry_flash_id)
+                if person:
+                    self._entry_prompt = self.prompt_generator.get_entry_prompt(person.shirt_name)
+                    if self.audio_manager:
+                        self.audio_manager.play_sfx("whoosh", volume=0.65)
+                else:
+                    self._entry_prompt = self.prompt_generator.generate(
+                        state_output.state,
+                        len(people),
+                        len(set(p.shirt_rgb for p in people)),
+                        colors_contrasting,
+                    )
+                self._entry_prompt_id = state_output.entry_flash_id
+                self._entry_prompt_until = timestamp + self.state_machine.ENTRY_FLASH_DURATION
+            prompt = self._entry_prompt or ""
             self._last_entry_id = state_output.entry_flash_id
         elif state_output.pulse_active:
-            # Color pulse
-            color_names = [p.shirt_name for p in people]
-            prompt = self.prompt_generator.get_pulse_prompt(color_names)
-            if self.audio_manager:
-                self.audio_manager.play_sfx("chime", volume=0.3)
+            if not self._pulse_active_last:
+                color_names = sorted(p.shirt_name for p in people if p.shirt_name)
+                self._pulse_prompt = self.prompt_generator.get_pulse_prompt(color_names)
+                self._pulse_prompt_until = timestamp + self._pulse_prompt_duration
+                if self.audio_manager:
+                    self.audio_manager.play_sfx("chime", volume=0.3)
+            prompt = self._pulse_prompt or ""
         else:
+            self._entry_prompt_id = None
+            self._entry_prompt_until = None
+            self._entry_prompt = None
+            self._pulse_prompt_until = None
+            self._pulse_prompt = None
             # Normal prompt
             cooldown_override = None
             if self._last_prompt_state == state_output.state:
@@ -434,6 +455,7 @@ class BondFireVision:
                 cooldown_override=cooldown_override,
             )
 
+        self._pulse_active_last = state_output.pulse_active
         self._last_prompt_state = state_output.state
 
         # Narrate prompts when they change

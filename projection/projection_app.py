@@ -362,6 +362,11 @@ class BondFireProjection(mglw.WindowConfig):
         self._demo_time = 0.0
         self._video_layer = None
         self._video_texture = None
+        self._smoothed_palette: List[Tuple[float, float, float]] = []
+        self._smoothed_state_color: Tuple[float, float, float] = (1.0, 0.5, 0.1)
+        self._state_current_index = self._state_to_index(self._state.state_name)
+        self._state_prev_index = self._state_current_index
+        self._state_transition_start = -1.0
 
         window_cfg = self.config_data.get("window", {})
         if window_cfg.get("vsync", True):
@@ -450,6 +455,8 @@ class BondFireProjection(mglw.WindowConfig):
                 uniform vec2 u_aspect;
                 uniform float u_time;
                 uniform int u_state;
+                uniform int u_state_prev;
+                uniform float u_state_blend;
                 uniform int u_people;
                 uniform float u_fire;
                 uniform float u_pulse;
@@ -549,7 +556,10 @@ class BondFireProjection(mglw.WindowConfig):
                     float party = smoothstep(0.0, 1.0, u_party) *
                                   (0.5 + 0.5 * cos((delta.x * 12.0 + delta.y * 12.0) + u_time * 4.0));
 
-                    float phone_glitch = u_state == 3 ? noise(uv * 60.0 + u_time * 2.0) * 0.4 : 0.0;
+                    float phone_prev = u_state_prev == 3 ? 1.0 : 0.0;
+                    float phone_curr = u_state == 3 ? 1.0 : 0.0;
+                    float phone_weight = mix(phone_prev, phone_curr, u_state_blend);
+                    float phone_glitch = noise(uv * 60.0 + u_time * 2.0) * 0.4 * phone_weight;
 
                     float celebration = smoothstep(0.0, 1.0, u_celebration) *
                                         (0.6 + 0.4 * sin(u_time * 12.0));
@@ -569,14 +579,25 @@ class BondFireProjection(mglw.WindowConfig):
                     float flicker_mix = clamp((flicker_a * 0.6 + flicker_b * 0.3 + flicker_c * 0.1), 0.0, 1.0);
                     flicker_mix = smoothstep(0.2, 0.95, flicker_mix);
 
-                    float state_gain = 1.0;
-                    if (u_state == 0) {
-                        state_gain = 0.45;
-                    } else if (u_state == 2) {
-                        state_gain = 1.25;
-                    } else if (u_state == 3) {
-                        state_gain = 0.75;
+                    float gain_prev = 1.0;
+                    if (u_state_prev == 0) {
+                        gain_prev = 0.45;
+                    } else if (u_state_prev == 2) {
+                        gain_prev = 1.25;
+                    } else if (u_state_prev == 3) {
+                        gain_prev = 0.75;
                     }
+
+                    float gain_curr = 1.0;
+                    if (u_state == 0) {
+                        gain_curr = 0.45;
+                    } else if (u_state == 2) {
+                        gain_curr = 1.25;
+                    } else if (u_state == 3) {
+                        gain_curr = 0.75;
+                    }
+
+                    float state_gain = mix(gain_prev, gain_curr, u_state_blend);
 
                     float fire_gain = clamp(u_fire * state_gain + 0.15, 0.0, 1.4);
 
@@ -594,27 +615,27 @@ class BondFireProjection(mglw.WindowConfig):
                     color += u_state_color * ring_glow * (ring_floor * 0.35);
                     color += u_state_color * inner_band * (0.9 * fill_boost);
 
-                    if (u_state == 0) {
-                        float idle_breath = 0.6 + 0.4 * base_pulse;
-                        color += u_state_color * ring_glow * (0.6 * idle_breath);
-                    }
+                    float idle_prev = u_state_prev == 0 ? 1.0 : 0.0;
+                    float idle_curr = u_state == 0 ? 1.0 : 0.0;
+                    float idle_weight = mix(idle_prev, idle_curr, u_state_blend);
+                    float idle_breath = 0.6 + 0.4 * base_pulse;
+                    color += u_state_color * ring_glow * (0.6 * idle_breath) * idle_weight;
 
+                    float party_prev = u_state_prev == 2 ? 1.0 : 0.0;
+                    float party_curr = u_state == 2 ? 1.0 : 0.0;
+                    float party_weight = mix(party_prev, party_curr, u_state_blend);
                     vec3 party_color = vec3(0.0);
-                    if (u_state == 2) {
-                        float hue = fract(u_time * 0.02);
-                        float hue_b = fract(hue + 0.2);
-                        vec3 color_a = hsv2rgb(vec3(hue, 0.9, 1.0));
-                        vec3 color_b = hsv2rgb(vec3(hue_b, 0.9, 1.0));
-                        float blend = 0.5 + 0.5 * sin(u_time * 0.6);
-                        party_color = mix(color_a, color_b, blend);
-                        color += party_color * ring * 0.7;
-                        color += party_color * ring_glow * 0.4;
-                    }
+                    float hue = fract(u_time * 0.02);
+                    float hue_b = fract(hue + 0.2);
+                    vec3 color_a = hsv2rgb(vec3(hue, 0.9, 1.0));
+                    vec3 color_b = hsv2rgb(vec3(hue_b, 0.9, 1.0));
+                    float blend = 0.5 + 0.5 * sin(u_time * 0.6);
+                    party_color = mix(color_a, color_b, blend);
+                    color += party_color * ring * 0.7 * party_weight;
+                    color += party_color * ring_glow * 0.4 * party_weight;
 
-                    if (u_state == 3) {
-                        float phone_spark = step(0.92, noise(uv * 50.0 + u_time * 6.0));
-                        color += vec3(1.0, 0.3, 0.3) * phone_spark * 0.8;
-                    }
+                    float phone_spark = step(0.92, noise(uv * 50.0 + u_time * 6.0));
+                    color += vec3(1.0, 0.3, 0.3) * phone_spark * 0.8 * phone_weight;
                     color += ember * (0.2 + 0.4 * swirl) * base;
                     color += ember * embers * 0.65;
                     color += u_palette[2] * pulse * 0.6;
@@ -634,7 +655,7 @@ class BondFireProjection(mglw.WindowConfig):
                     vec3 flood = mix(vec3(u_background), filled, clamp(0.5 + fill_boost * 1.5, 0.0, 1.0));
                     color = mix(filled, core, fill_boost);
                     color = mix(color, flood, fill_boost);
-                    vec3 flood_tint = (u_state == 2) ? party_color : u_state_color;
+                    vec3 flood_tint = mix(u_state_color, party_color, party_weight);
                     color = mix(color, flood_tint * 0.85, fill_boost * 0.9);
                     float tex_strength = clamp(u_texture_strength, 0.0, 2.0);
                     color *= (1.0 + texture_mask * tex_strength * 0.6);
@@ -714,6 +735,37 @@ class BondFireProjection(mglw.WindowConfig):
         with self._lock:
             self._state.update_from_packet(packet)
 
+    @staticmethod
+    def _smooth_value(current: float, target: float, dt: float, tau: float) -> float:
+        if tau <= 0.0:
+            return target
+        alpha = 1.0 - math.exp(-dt / tau)
+        return current + (target - current) * alpha
+
+    def _smooth_color(
+        self,
+        current: Tuple[float, float, float],
+        target: Tuple[float, float, float],
+        dt: float,
+        tau: float,
+    ) -> Tuple[float, float, float]:
+        return (
+            self._smooth_value(current[0], target[0], dt, tau),
+            self._smooth_value(current[1], target[1], dt, tau),
+            self._smooth_value(current[2], target[2], dt, tau),
+        )
+
+    def _smooth_palette(
+        self,
+        current: List[Tuple[float, float, float]],
+        target: List[Tuple[float, float, float]],
+        dt: float,
+        tau: float,
+    ) -> List[Tuple[float, float, float]]:
+        if not current or len(current) != len(target):
+            return list(target)
+        return [self._smooth_color(c, t, dt, tau) for c, t in zip(current, target)]
+
     def render(self, time: float, frame_time: float) -> None:
         if self.args.no_udp:
             self._advance_demo(frame_time)
@@ -723,13 +775,29 @@ class BondFireProjection(mglw.WindowConfig):
 
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
 
-        palette = self._resolve_palette(
+        palette_target = self._resolve_palette(
             state_snapshot.dominant_palette,
             state_snapshot.state_name,
             state_snapshot.pulse_active,
         )
-        state_color = self._resolve_state_color(state_snapshot.state_name)
+        state_color_target = self._resolve_state_color(state_snapshot.state_name)
+        dt = max(0.0, float(frame_time))
+        color_tau = float(self._visuals.get("color_smooth_sec", 0.8))
+        self._smoothed_palette = self._smooth_palette(self._smoothed_palette, palette_target, dt, color_tau)
+        self._smoothed_state_color = self._smooth_color(
+            self._smoothed_state_color,
+            state_color_target,
+            dt,
+            color_tau,
+        )
+        palette = self._smoothed_palette
+        state_color = self._smoothed_state_color
+
         state_index = self._state_to_index(state_snapshot.state_name)
+        if state_index != self._state_current_index:
+            self._state_prev_index = self._state_current_index
+            self._state_current_index = state_index
+            self._state_transition_start = time
 
         text_cfg = self._text_cfg
         if text_cfg.get("enabled", True):
@@ -765,7 +833,16 @@ class BondFireProjection(mglw.WindowConfig):
         self._set_uniform(prog, "u_time", time)
         aspect = float(self.wnd.width) / max(1.0, float(self.wnd.height))
         self._set_uniform(prog, "u_aspect", (aspect, 1.0))
-        self._set_uniform(prog, "u_state", state_index)
+        transition_sec = float(self._visuals.get("state_transition_sec", 1.2))
+        if transition_sec <= 0.0:
+            blend = 1.0
+        else:
+            if self._state_transition_start < 0.0:
+                self._state_transition_start = time - transition_sec
+            blend = clamp((time - self._state_transition_start) / transition_sec, 0.0, 1.0)
+        self._set_uniform(prog, "u_state", int(self._state_current_index))
+        self._set_uniform(prog, "u_state_prev", int(self._state_prev_index))
+        self._set_uniform(prog, "u_state_blend", float(blend))
         self._set_uniform(prog, "u_people", int(state_snapshot.people_count))
         render_fire = float(state_snapshot.fire_intensity)
         if not math.isfinite(render_fire):
