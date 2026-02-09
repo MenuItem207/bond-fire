@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 import sys
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import moderngl
 import moderngl_window as mglw
@@ -198,6 +198,88 @@ class TextLayer:
         output.alpha_composite(resized, dest=(0, top))
         return output
 
+    def to_texture(self, ctx: moderngl.Context) -> moderngl.Texture:
+        texture = ctx.texture(self.size, 4)
+        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        texture.repeat_x = False
+        texture.repeat_y = False
+        texture.write(self._image.tobytes())
+        self._dirty = False
+        return texture
+
+
+class VideoLayer:
+    def __init__(self, path: str, speed: float = 1.0, loop: bool = True) -> None:
+        self._path = path
+        self._speed = max(0.1, speed)
+        self._loop = loop
+        self._cap = None
+        self._cv2 = None
+        self._accum = 0.0
+        self._last_frame: Optional[np.ndarray] = None
+        self.width = 0
+        self.height = 0
+        self.fps = 30.0
+        self.frame_interval = 1.0 / self.fps
+        self.available = False
+
+        try:
+            import cv2
+        except Exception:
+            return
+
+        self._cv2 = cv2
+        cap = cv2.VideoCapture(path)
+        if not cap.isOpened():
+            return
+
+        self._cap = cap
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps and fps > 1:
+            self.fps = fps
+        self.frame_interval = 1.0 / self.fps
+
+        self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.available = True
+
+    def update(self, dt: float) -> Optional[np.ndarray]:
+        if not self.available or not self._cap or not self._cv2:
+            return None
+
+        self._accum += dt * self._speed
+        if self._last_frame is None:
+            self._last_frame = self._read_next()
+            return self._last_frame
+
+        if self._accum < self.frame_interval:
+            return self._last_frame
+
+        while self._accum >= self.frame_interval:
+            frame = self._read_next()
+            if frame is None:
+                break
+            self._last_frame = frame
+            self._accum -= self.frame_interval
+
+        return self._last_frame
+
+    def _read_next(self) -> Optional[np.ndarray]:
+        if not self._cap or not self._cv2:
+            return None
+        ok, frame = self._cap.read()
+        if not ok:
+            if self._loop:
+                self._cap.set(self._cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, frame = self._cap.read()
+            if not ok:
+                return None
+        frame = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
+        frame = np.flipud(frame)
+        if self.width <= 0 or self.height <= 0:
+            self.height, self.width = frame.shape[:2]
+        return frame
+
     def _draw_circular_text(
         self,
         draw: ImageDraw.ImageDraw,
@@ -278,6 +360,8 @@ class BondFireProjection(mglw.WindowConfig):
         self._lock = threading.Lock()
         self._state = VisualState()
         self._demo_time = 0.0
+        self._video_layer = None
+        self._video_texture = None
 
         window_cfg = self.config_data.get("window", {})
         if window_cfg.get("vsync", True):
@@ -288,6 +372,7 @@ class BondFireProjection(mglw.WindowConfig):
         self._load_visual_config()
         self._setup_geometry()
         self._setup_text()
+        self._setup_video()
 
         self._listener = None
         if not self.args.no_udp:
@@ -365,6 +450,7 @@ class BondFireProjection(mglw.WindowConfig):
                 uniform vec2 u_aspect;
                 uniform float u_time;
                 uniform int u_state;
+                uniform int u_people;
                 uniform float u_fire;
                 uniform float u_pulse;
                 uniform float u_pulse_speed;
@@ -375,6 +461,11 @@ class BondFireProjection(mglw.WindowConfig):
                 uniform vec3 u_palette[4];
                 uniform vec3 u_state_color;
                 uniform float u_ring_floor;
+                uniform sampler2D u_video;
+                uniform int u_video_enabled;
+                uniform float u_video_mix;
+                uniform float u_video_alpha;
+                uniform float u_video_colorize;
                 uniform sampler2D u_text;
                 uniform float u_text_mix;
                 uniform int u_text_mode;
@@ -387,6 +478,7 @@ class BondFireProjection(mglw.WindowConfig):
                 uniform float u_text_stretch;
                 uniform float u_baseline_fire;
                 uniform float u_background;
+                uniform float u_texture_strength;
                 uniform float u_base_radius;
                 uniform float u_ring_inner;
                 uniform float u_ring_outer;
@@ -408,6 +500,12 @@ class BondFireProjection(mglw.WindowConfig):
                     return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
                 }
 
+                vec3 hsv2rgb(vec3 c) {
+                    vec4 k = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+                    vec3 p = abs(fract(c.xxx + k.xyz) * 6.0 - k.www);
+                    return c.z * mix(k.xxx, clamp(p - k.xxx, 0.0, 1.0), c.y);
+                }
+
                 void main() {
                     vec3 proj = u_h * vec3(v_uv, 1.0);
                     vec2 uv = proj.xy / proj.z;
@@ -422,10 +520,14 @@ class BondFireProjection(mglw.WindowConfig):
                     delta *= u_aspect;
                     float dist = length(delta);
 
+                    float fill_factor = clamp(float(u_people) / 5.0, 0.0, 1.0);
+                    float fill_boost = pow(fill_factor, 0.6);
                     float base = smoothstep(0.55, 0.0, dist);
                     float center_mask = smoothstep(u_base_radius, u_base_radius - 0.015, dist);
                     float ring = smoothstep(u_ring_inner, u_ring_inner - 0.01, dist)
                                - smoothstep(u_ring_outer, u_ring_outer - 0.01, dist);
+                    float inner_band = smoothstep(u_base_radius + 0.03, u_base_radius - 0.01, dist)
+                                     - smoothstep(u_ring_inner + 0.01, u_ring_inner - 0.02, dist);
                     float ring_glow = smoothstep(u_ring_outer + 0.10, u_ring_inner - 0.02, dist);
 
                     float flame = sin(u_time * 3.0 + dist * 8.0) * 0.5 + 0.5;
@@ -452,8 +554,20 @@ class BondFireProjection(mglw.WindowConfig):
                     float celebration = smoothstep(0.0, 1.0, u_celebration) *
                                         (0.6 + 0.4 * sin(u_time * 12.0));
 
-                    float ember_field = noise(uv * 18.0 + vec2(0.0, u_time * 0.7));
+                    vec2 warp = vec2(
+                        noise(uv * 6.0 + vec2(u_time * 0.15, 0.0)),
+                        noise(uv * 6.0 + vec2(0.0, u_time * 0.12))
+                    ) * 0.02;
+                    vec2 uv_warp = uv + warp + vec2(0.0, -u_time * 0.03);
+
+                    float ember_field = noise(uv_warp * 18.0 + vec2(0.0, u_time * 0.7));
                     float embers = smoothstep(0.6, 1.0, ember_field) * (0.4 + 0.6 * base);
+
+                    float flicker_a = noise(uv_warp * 6.0 + vec2(0.0, u_time * 0.4));
+                    float flicker_b = noise(uv_warp * 14.0 + vec2(u_time * 0.7, 0.0));
+                    float flicker_c = noise(uv_warp * 30.0 + vec2(u_time * 1.1, u_time * 0.3));
+                    float flicker_mix = clamp((flicker_a * 0.6 + flicker_b * 0.3 + flicker_c * 0.1), 0.0, 1.0);
+                    flicker_mix = smoothstep(0.2, 0.95, flicker_mix);
 
                     float state_gain = 1.0;
                     if (u_state == 0) {
@@ -478,16 +592,66 @@ class BondFireProjection(mglw.WindowConfig):
                     color += ember * ring_glow * (ring_floor * 0.6);
                     color += u_state_color * ring * (ring_floor * 0.8);
                     color += u_state_color * ring_glow * (ring_floor * 0.35);
+                    color += u_state_color * inner_band * (0.9 * fill_boost);
+
+                    if (u_state == 0) {
+                        float idle_breath = 0.6 + 0.4 * base_pulse;
+                        color += u_state_color * ring_glow * (0.6 * idle_breath);
+                    }
+
+                    vec3 party_color = vec3(0.0);
+                    if (u_state == 2) {
+                        float hue = fract(u_time * 0.02);
+                        float hue_b = fract(hue + 0.2);
+                        vec3 color_a = hsv2rgb(vec3(hue, 0.9, 1.0));
+                        vec3 color_b = hsv2rgb(vec3(hue_b, 0.9, 1.0));
+                        float blend = 0.5 + 0.5 * sin(u_time * 0.6);
+                        party_color = mix(color_a, color_b, blend);
+                        color += party_color * ring * 0.7;
+                        color += party_color * ring_glow * 0.4;
+                    }
+
+                    if (u_state == 3) {
+                        float phone_spark = step(0.92, noise(uv * 50.0 + u_time * 6.0));
+                        color += vec3(1.0, 0.3, 0.3) * phone_spark * 0.8;
+                    }
                     color += ember * (0.2 + 0.4 * swirl) * base;
                     color += ember * embers * 0.65;
                     color += u_palette[2] * pulse * 0.6;
                     color += u_palette[1] * party * 0.5;
                     color += vec3(0.2, 0.4, 0.9) * phone_glitch;
-                    color = mix(vec3(u_background + u_baseline_fire * 0.2), color, clamp(glow_gain + 0.35, 0.0, 1.4));
+
+                    vec3 texture_warm = mix(u_palette[0], u_palette[1], flicker_mix);
+                    vec3 texture_hot = mix(u_palette[2], u_palette[3], flicker_mix);
+                    vec3 texture_color = mix(texture_warm, texture_hot, base);
+
+                    float streaks = smoothstep(0.3, 1.0, noise(vec2(uv_warp.x * 6.0, uv_warp.y * 12.0)));
+                    float flame_rise = clamp(1.0 - uv.y, 0.0, 1.0);
+                    float texture_mask = (0.35 + 0.8 * flicker_mix) * (0.5 + 0.7 * base) * flame_rise;
+                    texture_mask += streaks * (0.45 + 0.55 * base) * flame_rise;
+                    vec3 filled = mix(vec3(u_background + u_baseline_fire * 0.2), color, clamp(glow_gain + 0.35, 0.0, 1.4));
+                    vec3 core = mix(vec3(u_background), filled, clamp(base + fill_boost, 0.0, 1.0));
+                    vec3 flood = mix(vec3(u_background), filled, clamp(0.5 + fill_boost * 1.5, 0.0, 1.0));
+                    color = mix(filled, core, fill_boost);
+                    color = mix(color, flood, fill_boost);
+                    vec3 flood_tint = (u_state == 2) ? party_color : u_state_color;
+                    color = mix(color, flood_tint * 0.85, fill_boost * 0.9);
+                    float tex_strength = clamp(u_texture_strength, 0.0, 2.0);
+                    color *= (1.0 + texture_mask * tex_strength * 0.6);
+
+                    float inner_tint = smoothstep(u_base_radius + 0.02, u_base_radius - 0.04, dist);
+                    color = mix(color, flood_tint * 0.9, inner_tint * fill_boost);
 
                     color += celebration * vec3(1.0, 0.8, 0.6);
 
-                    color = mix(color, vec3(0.0), center_mask);
+                    color = mix(color, vec3(0.0), center_mask * (1.0 - fill_boost));
+
+                    if (u_video_enabled == 1) {
+                        vec2 vuv = vec2(uv.x, 1.0 - uv.y);
+                        vec3 vid = texture(u_video, vuv).rgb;
+                        vec3 vid_color = mix(vid, u_state_color, u_video_colorize);
+                        color = mix(color, vid_color, clamp(u_video_mix, 0.0, 1.0) * u_video_alpha);
+                    }
 
                     vec4 text_sample = vec4(0.0);
                     if (u_text_mode == 1) {
@@ -503,8 +667,9 @@ class BondFireProjection(mglw.WindowConfig):
                     }
                     color = mix(color, text_sample.rgb, text_sample.a * u_text_mix * u_text_alpha);
 
-                    float vignette = smoothstep(0.92, 0.35, dist);
-                    color *= vignette;
+                    float vignette = smoothstep(0.98, 0.25, dist);
+                    float edge_fade = smoothstep(0.98, 0.82, dist);
+                    color *= mix(vignette, edge_fade, fill_boost);
 
                     f_color = vec4(color, 1.0);
                 }
@@ -522,6 +687,28 @@ class BondFireProjection(mglw.WindowConfig):
             size = (1024, 512)
         self._text_layer = TextLayer(size, font_name, font_size)
         self._text_texture = self._text_layer.to_texture(self.ctx)
+
+    def _setup_video(self) -> None:
+        video_cfg = self.config_data.get("video", {})
+        if not video_cfg.get("enabled", False):
+            return
+        path = str(video_cfg.get("path", "")).strip()
+        if not path:
+            return
+
+        video_path = Path(path)
+        if not video_path.is_absolute():
+            video_path = Path(self.args.config).parent / video_path
+
+        layer = VideoLayer(str(video_path), speed=float(video_cfg.get("speed", 1.0)), loop=bool(video_cfg.get("loop", True)))
+        if not layer.available or layer.width <= 0 or layer.height <= 0:
+            return
+
+        self._video_layer = layer
+        self._video_texture = self.ctx.texture((layer.width, layer.height), 3)
+        self._video_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._video_texture.repeat_x = False
+        self._video_texture.repeat_y = False
 
     def _on_packet(self, packet: dict) -> None:
         with self._lock:
@@ -568,12 +755,18 @@ class BondFireProjection(mglw.WindowConfig):
                 self._text_texture.release()
                 self._text_texture = self._text_layer.to_texture(self.ctx)
 
+        if self._video_layer and self._video_texture:
+            frame = self._video_layer.update(frame_time)
+            if frame is not None:
+                self._video_texture.write(frame.tobytes())
+
         prog = self._vao.program
         self._set_uniform(prog, "u_h", self._homography.T.tobytes(), is_matrix=True)
         self._set_uniform(prog, "u_time", time)
         aspect = float(self.wnd.width) / max(1.0, float(self.wnd.height))
         self._set_uniform(prog, "u_aspect", (aspect, 1.0))
         self._set_uniform(prog, "u_state", state_index)
+        self._set_uniform(prog, "u_people", int(state_snapshot.people_count))
         render_fire = float(state_snapshot.fire_intensity)
         if not math.isfinite(render_fire):
             render_fire = 0.0
@@ -614,15 +807,27 @@ class BondFireProjection(mglw.WindowConfig):
         self._set_uniform(prog, "u_text_speed", float(text_cfg.get("spin_speed", 0.02)))
         self._set_uniform(prog, "u_text_stretch", float(text_cfg.get("height_scale", 1.0)))
         self._set_uniform(prog, "u_background", float(self._visuals.get("background_intensity", 0.1)))
+        self._set_uniform(prog, "u_texture_strength", float(self._visuals.get("texture_strength", 1.2)))
         self._set_uniform(prog, "u_base_radius", float(self._center_radius))
         self._set_uniform(prog, "u_ring_inner", float(self._ring_inner))
         self._set_uniform(prog, "u_ring_outer", float(self._ring_outer))
+
+        video_cfg = self.config_data.get("video", {})
+        video_enabled = 1 if self._video_layer and self._video_texture and video_cfg.get("enabled", False) else 0
+        self._set_uniform(prog, "u_video_enabled", video_enabled)
+        self._set_uniform(prog, "u_video_mix", float(video_cfg.get("mix", 0.0)))
+        self._set_uniform(prog, "u_video_alpha", float(video_cfg.get("alpha", 1.0)))
+        self._set_uniform(prog, "u_video_colorize", float(video_cfg.get("colorize", 0.0)))
 
         for idx in range(4):
             self._set_uniform(prog, f"u_palette[{idx}]", palette[idx])
         self._set_uniform(prog, "u_state_color", state_color)
 
+        self._set_uniform(prog, "u_text", 0)
         self._text_texture.use(location=0)
+        if self._video_texture:
+            self._set_uniform(prog, "u_video", 1)
+            self._video_texture.use(location=1)
         self._vao.render(moderngl.TRIANGLE_STRIP)
 
         if self._calibration:

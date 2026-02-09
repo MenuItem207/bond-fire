@@ -50,3 +50,20 @@ Circle + Ring (live adjustments):
 - Mapping quad points are normalized (0..1). Match them to your physical surface.
 - The visuals respond to `state`, `fire_intensity`, `dominant_palette`, `pulse_active`, `party_buildup_progress`, and `celebration`.
 - Text prompts are pulled from the packet `prompt` field.
+
+## Video Layer (Optional)
+
+Enable the video layer in [projection/config.yaml](projection/config.yaml):
+
+```yaml
+video:
+	enabled: true
+	path: "assets/video/fire.mp4"
+	mix: 0.35
+	alpha: 1.0
+	colorize: 0.6
+	speed: 1.0
+	loop: true
+```
+
+The video is blended in the shader and can be colorized by the current state.

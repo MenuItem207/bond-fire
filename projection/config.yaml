@@ -47,6 +47,7 @@ visuals:
   background_intensity: 0.18
   baseline_fire: 0.7
   ring_floor: 0.6
+  texture_strength: 40
   palette_fallback:
     - [255, 120, 20]
     - [255, 70, 10]
@@ -54,22 +55,30 @@ visuals:
     - [120, 40, 10]
   state_palettes:
     IDLE:
-      - [0, 80, 140]
+      - [0, 100, 150]
       - [0, 120, 200]
       - [10, 40, 80]
       - [0, 160, 200]
     FIRE:
+      - [255, 150, 0]
       - [255, 120, 20]
       - [255, 70, 10]
       - [255, 180, 80]
-      - [120, 40, 10]
     PARTY:
-      - [255, 0, 140]
+      - [255, 50, 255]
       - [255, 80, 20]
       - [40, 180, 255]
       - [180, 60, 255]
     PHONE:
-      - [200, 0, 0]
+      - [200, 200, 200]
       - [255, 40, 40]
       - [120, 0, 0]
-      - [255, 200, 200]
+      - [255, 120, 120]
+video:
+  enabled: false
+  path: "assets/video/fire.mp4"
+  mix: 0.35
+  alpha: 1.0
+  colorize: 0.6
+  speed: 1.0
+  loop: true
