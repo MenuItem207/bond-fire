@@ -26,87 +26,92 @@ class LocalPromptGenerator:
 
     # Prompt dictionaries by state
     IDLE_PROMPTS = [
-        "Social Battery: 0%. I need a spark...",
-        "Waiting for brave souls...",
-        "The fire sleeps. Wake it up.",
-        "Empty space, empty flame.",
-        "Come closer. I don't bite.",
-        "Lonely fire seeks connection.",
+        "I'm burning for nobody. Sad sia.",
+        "Free warmth. Why you running?",
+        "Come. I won't bite. Maybe.",
+        "Ghost town here. Be the main character.",
+        "Don't paiseh. Just step in.",
+        "Your crush might be the next one to join.",
+        "Provide me company, I provide vibes.",
     ]
 
     FIRE_1_PROMPTS = [
-        "One spark. But fires need friends.",
-        "Lone flame detected. Battery: 20%",
-        "Solo mode: Active. Multiplayer recommended.",
-        "One is brave. Two is better.",
-        "You started something. Keep going.",
+        "Main Character energy. Now find a sidekick.",
+        "You look lonely. Drag someone in.",
+        "Make eye contact with a stranger. I dare you.",
+        "Solo is cool, duo is warmer.",
+        "Don't scroll. Wave at the next person.",
+        "I'm judging your outfit. Come closer.",
+        "Wait for it... someone cool is coming.",
     ]
 
     FIRE_2_PROMPTS = [
-        "Two flames dancing—who's braver, bro?",
-        "Pair detected. Battery: 40%",
-        "Double trouble! One more?",
-        "Two sparks. Getting warmer.",
-        "Nice duo. But we can do better.",
+        "Date night or strangers? I can't tell.",
+        "Accepting applications for a third wheel.",
+        "Awkward silence? Talk about me.",
+        "You two look good. Need one more critic.",
+        "Don't gatekeep the heat. Jio someone.",
+        "Create a conspiracy theory about the next person.",
+        "Two is company, three is a party.",
     ]
 
     FIRE_3_PROMPTS = [
-        "Three's a fire. One more for a blaze!",
-        "Battery 60%. Almost there!",
-        "Trio energy! Two more for critical mass.",
-        "Three flames strong. Keep recruiting!",
-        "Getting hot in here. Literally.",
+        "We need a fourth player for Mahjong.",
+        "Triangle formation strong. Square is better.",
+        "Almost a squad. Who's the missing link?",
+        "Don't let the next person walk past. Stare at them.",
+        "Three's a crowd? Nah, three's a crew.",
+        "Look at you three. Best friends already?",
+        "One more spot to unlock full power.",
     ]
 
     FIRE_4_PROMPTS = [
-        "Almost there! Find one more legend.",
-        "Four flames roaring. One more for chaos!",
-        "SO CLOSE! Where's number five?",
-        "Elite squad forming. One slot left!",
-        "Battery: 80%. Final push!",
+        "One slot left. Auditions open.",
+        "Who is the chosen one? Point at them.",
+        "So squeezy. I love it.",
+        "Don't be selfish. Squeeze one more in.",
+        "Perfect balance pending. One more.",
+        "Tell the next walker: 'We've been expecting you.'",
     ]
 
     PARTY_PROMPTS = [
-        "CRITICAL MASS ACHIEVED! 🔥",
-        "FIVE FLAMES = PURE ENERGY!",
-        "THIS IS WHAT CONNECTION LOOKS LIKE!",
-        "LEGENDARY STATUS UNLOCKED!",
-        "THE SQUAD IS HERE!",
-        "MAXIMUM VIBES ACTIVATED!",
-        "FIRE NATION ASSEMBLED!",
-        "YOU DID IT! THIS IS EPIC!",
+        "Kampung spirit unlocked. Shiok.",
+        "Okay, nobody move. This lighting is perfection.",
+        "Look at everyone. Now smile. Cute.",
+        "Core memory unlocked. Stay here.",
+        "Vibe check passed. 10/10.",
+        "This is it. The peak of your day.",
+        "Whatever you're doing, it's working.",
+        "Full house! Don't break the chain.",
     ]
 
     PHONE_PROMPTS = [
-        "🚫 PHONE DETECTED. PUT IT AWAY!",
-        "📱 → 🔥 DISCONNECT TO CONNECT!",
-        "📵 FOCUS. THE FIRE WAITS FOR YOU.",
-        "☠️ PHONE KILLS THE VIBE. HELP US.",
-        "💔 YOU BROKE THE CIRCLE.",
-        "⚠️ SIGNAL INTERFERENCE DETECTED!",
-        "👀 EYES UP. SCREENS DOWN.",
-        "🎯 THIS IS MORE IMPORTANT THAN YOUR FEED!",
-        "🔥 > 📱 ALWAYS.",
-        "⏰ DISCONNECT NOW. CONNECT WITH US!",
+        "Eh, your phone cold. I am hot.",
+        "IG Story can wait. I cannot.",
+        "Doomscrolling won't keep you warm.",
+        "Look up. Real life is in 4K resolution.",
+        "Text the person next to you instead.",
+        "Aiyo, put the black mirror away.",
+        "Your boss isn't here. Relax lah.",
     ]
 
     PHONE_EXIT_PROMPTS = [
-        "🎉 YES! WELCOME BACK TO THE FIRE!",
-        "✨ SMART CHOICE! LET'S BURN!",
-        "🔥 ATTENTION RESTORED. FIRE APPROVED!",
-        "🌟 NOW WE'RE TALKING!",
-        "💫 CONNECTION RESTORED. WITH THE FIRE!",
-        "🎊 THAT'S WHAT WE NEEDED!",
-        "👏 YOU DID IT! THE FIRE CELEBRATES YOU!",
+        "Welcome back to reality.",
+        "Nice eyes. Thanks for using them.",
+        "Humanity restored. Good job.",
+        "See? Real life not so bad.",
+        "Offline looks good on you.",
+        "Notification cleared. Vibe resumed.",
     ]
 
     # Color-aware prompts (when multiple people have distinct colors)
     COLOR_PROMPTS = [
-        "Red meets blue—fusion energy!",
-        "Colors clashing—love it! Keep it going.",
-        "Rainbow squad detected. Beautiful.",
-        "Style mixing activated. Fire approves.",
-        "Different vibes, one flame.",
+        "Wah, this palette is expensive.",
+        "You guys coordinated this? Liar.",
+        "Fit check: immaculate.",
+        "Power Rangers vibes today.",
+        "Different styles, same heat.",
+        "Who dressed you guys? Good job.",
     ]
 
     def __init__(self, history_size: int = 10, prompt_cooldown: Optional[float] = None) -> None:
@@ -216,17 +221,17 @@ class LocalPromptGenerator:
         """
         if person_color_name:
             prompts = [
-                f"Welcome, {person_color_name}! Join the fire.",
-                f"{person_color_name} enters the flame!",
-                f"New spark: {person_color_name}!",
-                f"{person_color_name} joined. Fire grows!",
+                f"Eh {person_color_name}, come in.",
+                f"{person_color_name} shirt, nice. Join.",
+                f"New spark: {person_color_name}.",
+                f"{person_color_name} just joined.",
             ]
         else:
             prompts = [
-                "New flame detected!",
-                "Welcome to the fire!",
-                "Another spark joins!",
-                "Fresh energy incoming!",
+                "Eh, jump in.",
+                "Come in, don't shy.",
+                "New spark in.",
+                "Fresh energy.",
             ]
 
         return random.choice(prompts)
@@ -251,15 +256,15 @@ class LocalPromptGenerator:
             Pulse prompt string
         """
         if not color_names:
-            return "Unity pulse!"
+            return "Pulse together."
 
         if len(color_names) == 1:
-            return f"{color_names[0]} energy pulse!"
+            return f"{color_names[0]} pulse."
         elif len(color_names) == 2:
-            return f"{color_names[0]} + {color_names[1]} fusion!"
+            return f"{color_names[0]} + {color_names[1]} pulse."
         else:
             # Multiple colors
-            return f"Rainbow pulse: {', '.join(color_names[:3])}!"
+            return f"Rainbow pulse: {', '.join(color_names[:3])}."
 
     def clear_history(self) -> None:
         """Clear prompt history (useful for testing or reset)."""
