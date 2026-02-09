@@ -82,7 +82,7 @@ struct StateConfig {
 
 // Network
 WiFiUDP udp;
-char packetBuffer[1024];  // Increased for full v2.1 packets with 6 people
+char packetBuffer[1500];  // Allow larger v2.1 packets without truncation
 
 // Display Objects
 Adafruit_NeoMatrix matrixFront = Adafruit_NeoMatrix(32, 8, PIN_MATRIX_FRONT,
@@ -261,7 +261,7 @@ void loop() {
 // ===== SECTION 5: V2.1 PROTOCOL HANDLER (NEW) =====
 
 void handlePacket() {
-  int len = udp.read(packetBuffer, 1023);
+  int len = udp.read(packetBuffer, 1499);
   packetBuffer[len] = 0;
 
   JsonDocument doc;
@@ -302,13 +302,27 @@ void handlePacket() {
   currentStateConfig.pulse_active = doc["pulse_active"] | false;
   currentStateConfig.entry_flash_id = doc["entry_flash_id"] | -1;
 
-  // --- Parse Fire Intensity ---
-  // Use intensity from Python master (already calculated with state machine logic)
-  currentStateConfig.fire_intensity = doc["fire_intensity"] | 0.0f;
-
   // Parse people array for entry flash tracking
   JsonArray peopleArray = doc["people"];
   int peopleCount = peopleArray.size();
+
+  // --- Parse Fire Intensity ---
+  // Use intensity from Python master (already calculated with state machine logic)
+  float intensity = doc["fire_intensity"] | -1.0f;
+  if (intensity < 0.0f) {
+    if (peopleCount <= 0) {
+      intensity = 0.0f;
+    } else if (peopleCount == 1) {
+      intensity = 0.35f;
+    } else if (peopleCount == 2) {
+      intensity = 0.6f;
+    } else if (peopleCount == 3) {
+      intensity = 0.8f;
+    } else {
+      intensity = 1.0f;
+    }
+  }
+  currentStateConfig.fire_intensity = constrain(intensity, 0.0f, 1.0f);
 
   // --- Parse Dominant Palette ---
   JsonArray paletteArray = doc["dominant_palette"];
@@ -336,7 +350,10 @@ void handlePacket() {
     for (JsonObject person : peopleArray) {
       if (person["id"] == currentStateConfig.entry_flash_id) {
         JsonArray colorArray = person["color"];
-        if (colorArray.size() >= 3) {
+        if (colorArray.isNull() || colorArray.size() < 3) {
+          colorArray = person["shirt_rgb"];
+        }
+        if (!colorArray.isNull() && colorArray.size() >= 3) {
           entryFlashColor = CRGB(colorArray[0], colorArray[1], colorArray[2]);
           entryFlashUntil = millis() + 3000;  // Flash for 3 seconds
         }
@@ -506,6 +523,11 @@ void renderStateEffects() {
  * More people → More sparking and flicker (intensity 0.0-1.0)
  */
 void renderFireEffect() {
+  float intensity = currentStateConfig.fire_intensity;
+  if (intensity < 0.0f) intensity = 0.0f;
+  if (intensity > 1.0f) intensity = 1.0f;
+  uint8_t brightness = (uint8_t)(70.0f + (185.0f * intensity));
+
   // Cool down fire
   for (int i = 0; i < NUM_LEDS_RING; i++) {
     uint8_t cool = random8(0, ((FIRE_COOLING * 10) / NUM_LEDS_RING) + 2);
@@ -536,6 +558,7 @@ void renderFireEffect() {
     if (random8() < 40) {
       color += CRGB(random8(10, 40), random8(0, 15), 0);
     }
+    color.nscale8_video(brightness);
     ringLeds[j] = color;
   }
 }

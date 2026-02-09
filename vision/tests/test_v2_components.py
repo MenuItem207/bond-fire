@@ -136,7 +136,7 @@ class TestStateMachine:
         intensity4 = output4.fire_intensity
 
         assert intensity1 < intensity4
-        assert intensity1 == pytest.approx(0.25)
+        assert intensity1 == pytest.approx(0.35)
         assert intensity4 == pytest.approx(1.0)
 
     def test_pulse_timer(self):

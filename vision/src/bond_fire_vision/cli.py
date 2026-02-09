@@ -213,6 +213,7 @@ def _run_manual_state(
 
     def _worker() -> None:
         last_audio_state = AudioState.SILENT
+        last_log = 0.0
         colors = [
             (255, 120, 60),
             (200, 80, 40),
@@ -261,6 +262,7 @@ def _run_manual_state(
                 prompt=prompt,
                 mist_pwm=mist_pwm,
                 fan_pwm=fan_pwm,
+                fire_intensity=fire_intensity,
                 pulse_active=state_output.pulse_active,
                 entry_flash_id=state_output.entry_flash_id,
                 audio_state=audio_state,
@@ -269,15 +271,23 @@ def _run_manual_state(
             )
 
             try:
-                message = json.dumps(packet).encode("utf-8")
+                message = json.dumps(packet, separators=(",", ":")).encode("utf-8")
                 sock.sendto(message, (broadcast_ip, broadcast_port))
             except OSError as exc:
                 print(f"Network Error: {exc}", flush=True)
+
+            if now - last_log >= 1.0:
+                print(
+                    f"[MANUAL] {state.value} | people={people_count} | fire={fire_intensity:.2f}",
+                    flush=True,
+                )
+                last_log = now
 
             time.sleep(send_interval)
 
     worker_thread = threading.Thread(target=_worker, name="manual-state-worker", daemon=True)
     worker_thread.start()
+    print("Manual state mode active. Choose a scenario below.", flush=True)
 
     try:
         while True:
@@ -311,15 +321,15 @@ def _run_manual_state(
 
 
 def _print_manual_menu() -> None:
-    print("\nManual State Mode")
-    print("1) IDLE (0 people)")
-    print("2) FIRE (1 person)")
-    print("3) FIRE (3 people)")
-    print("4) FIRE (4 people)")
-    print("5) PARTY (5 people)")
-    print("6) PHONE detected (3 people)")
-    print("7) PHONE removed (3 people)")
-    print("8) Quit")
+    print("\nManual State Mode", flush=True)
+    print("1) IDLE (0 people)", flush=True)
+    print("2) FIRE (1 person)", flush=True)
+    print("3) FIRE (3 people)", flush=True)
+    print("4) FIRE (4 people)", flush=True)
+    print("5) PARTY (5 people)", flush=True)
+    print("6) PHONE detected (3 people)", flush=True)
+    print("7) PHONE removed (3 people)", flush=True)
+    print("8) Quit", flush=True)
 
 
 def _create_socket(broadcast_ip: str, broadcast_port: int) -> socket.socket:

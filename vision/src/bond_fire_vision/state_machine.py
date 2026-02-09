@@ -214,7 +214,7 @@ class StateMachine:
 
             elif self.state == State.PARTY:
                 # Check for PARTY exit
-                if people_count < 4:
+                if people_count <= 4:
                     if self._party_exit_start is None:
                         self._party_exit_start = now
                     elif now - self._party_exit_start >= self.PARTY_EXIT_DWELL:
@@ -303,8 +303,17 @@ class StateMachine:
             )
 
         elif self.state == State.FIRE:
-            # Scale intensity linearly: 1 person = 25%, 4 people = 100%
-            fire_intensity = min(0.25 + (people_count - 1) * 0.25, 1.0)
+            # Scale intensity in perceptible steps: 1->2 should feel dramatic
+            if people_count <= 0:
+                fire_intensity = 0.0
+            elif people_count == 1:
+                fire_intensity = 0.35
+            elif people_count == 2:
+                fire_intensity = 0.6
+            elif people_count == 3:
+                fire_intensity = 0.8
+            else:
+                fire_intensity = 1.0
 
             # Fan: 100 + (count * 30), capped at 255
             fan_pwm = min(self.FAN_MIN + people_count * 30, self.FAN_MAX)

@@ -463,6 +463,7 @@ class BondFireVision:
             prompt=prompt,
             mist_pwm=state_output.mist_pwm,
             fan_pwm=state_output.fan_pwm,
+            fire_intensity=state_output.fire_intensity,
             pulse_active=state_output.pulse_active,
             entry_flash_id=state_output.entry_flash_id,
             audio_state=audio_state,
@@ -472,7 +473,7 @@ class BondFireVision:
 
         # Send packet
         try:
-            message = json.dumps(packet).encode("utf-8")
+            message = json.dumps(packet, separators=(",", ":")).encode("utf-8")
             sock.sendto(message, (self.broadcast_ip, self.broadcast_port))
         except OSError as exc:
             print(f"Network Error: {exc}", flush=True)

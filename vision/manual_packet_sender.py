@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", help="Override text prompt.")
     parser.add_argument("--mist", type=int, default=220, help="Mist PWM (0-255).")
     parser.add_argument("--fan", type=int, default=100, help="Fan PWM (0-255).")
-    parser.add_argument("--fire-intensity", type=float, default=0.5, help="Fire intensity (0.0-1.0).")
+    parser.add_argument("--fire-intensity", type=float, default=None, help="Fire intensity (0.0-1.0).")
     parser.add_argument("--palette", nargs="+", type=int, help="Dominant palette as RGB triplets [r g b r g b ...].")
     parser.add_argument("--pulse", action="store_true", help="Activate pulse effect.")
     parser.add_argument("--celebration", action="store_true", help="Trigger celebration effect.")
@@ -82,6 +82,20 @@ def build_v2_1_payload(args: argparse.Namespace) -> Dict[str, Any]:
     palette = args.palette if args.palette else [255, 100, 0, 200, 50, 0]  # Default orange tones
     palette = palette[:12]  # Max 12 values (4 colors)
 
+    if args.fire_intensity is None:
+        if people <= 0:
+            fire_intensity = 0.0
+        elif people == 1:
+            fire_intensity = 0.35
+        elif people == 2:
+            fire_intensity = 0.6
+        elif people == 3:
+            fire_intensity = 0.8
+        else:
+            fire_intensity = 1.0
+    else:
+        fire_intensity = args.fire_intensity
+
     # Build packet
     packet = {
         "version": 2,
@@ -99,7 +113,7 @@ def build_v2_1_payload(args: argparse.Namespace) -> Dict[str, Any]:
         "audio_state": "PARTY" if state == "PARTY" else ("ALERT" if state == "PHONE" else "AMBIENT"),
         "party_buildup_progress": 0.0,
         "celebration": args.celebration,
-        "fire_intensity": max(0.0, min(1.0, args.fire_intensity)),
+        "fire_intensity": max(0.0, min(1.0, fire_intensity)),
     }
 
     return packet
@@ -107,7 +121,7 @@ def build_v2_1_payload(args: argparse.Namespace) -> Dict[str, Any]:
 
 def send_payload(sock: socket.socket, ip: str, port: int, payload: Dict[str, Any]) -> None:
     """Send packet and print confirmation."""
-    message = json.dumps(payload).encode("utf-8")
+    message = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     sock.sendto(message, (ip, port))
     state = payload.get("state", "???")
     people = len(payload.get("people", []))
@@ -238,7 +252,7 @@ def _cycle_presets(
                 prompt=None,
                 mist=220,
                 fan=100,
-                fire_intensity=0.5,
+                fire_intensity=None,
                 palette=None,
                 pulse=False,
                 celebration=False,
