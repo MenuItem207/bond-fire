@@ -65,6 +65,14 @@ def lowpass(samples: List[Sample], cutoff_hz: Callable[[int], float], sr: int) -
     return out
 
 
+def add_reverb(samples: List[Sample], sr: int, delay_s: float = 0.12, decay: float = 0.35) -> List[Sample]:
+    delay = max(1, int(delay_s * sr))
+    out = samples[:]
+    for i in range(delay, len(out)):
+        out[i] += out[i - delay] * decay
+    return out
+
+
 def write_wav(path: Path, samples: List[Sample], sr: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wf:
@@ -220,16 +228,16 @@ def make_supernova(duration: float, sr: int) -> List[Sample]:
     return normalize(mix([burst, drop]), peak=0.9)
 
 
-def make_party_music(duration: float, sr: int, bpm: float = 80.0) -> List[Sample]:
+def make_party_music(duration: float, sr: int, bpm: float = 84.0) -> List[Sample]:
     bars = int(duration / (60.0 / bpm * 4.0))
     beat_len = 60.0 / bpm
     length = int(duration * sr)
 
     chords = [
-        (220.0, 261.63, 329.63),
-        (174.61, 220.0, 261.63),
-        (130.81, 164.81, 196.0),
-        (146.83, 196.0, 246.94),
+        (261.63, 329.63, 392.0),
+        (293.66, 369.99, 440.0),
+        (329.63, 415.3, 493.88),
+        (349.23, 440.0, 523.25),
     ]
 
     pad = [0.0] * length
@@ -246,7 +254,7 @@ def make_party_music(duration: float, sr: int, bpm: float = 80.0) -> List[Sample
                 math.sin(2.0 * math.pi * chord[0] * t)
                 + math.sin(2.0 * math.pi * chord[1] * t)
                 + math.sin(2.0 * math.pi * chord[2] * t)
-            ) * amp * 0.12
+            ) * amp * 0.14
 
     total_beats = int(duration / beat_len)
     for beat in range(total_beats):
@@ -255,26 +263,28 @@ def make_party_music(duration: float, sr: int, bpm: float = 80.0) -> List[Sample
         for i in range(start, end):
             t = (i - start) / sr
             amp = env_adsr(t, (end - start) / sr, 0.01, 0.05, 0.5, 0.1)
-            bass[i] += math.sin(2.0 * math.pi * 55.0 * (beat % 2 + 1) * t) * amp * 0.2
+            bass[i] += math.sin(2.0 * math.pi * 65.4 * (1 + (beat % 2) * 0.5) * t) * amp * 0.2
 
     return normalize(mix([pad, bass]), peak=0.85)
 
 
-def make_party_layer(duration: float, sr: int, bpm: float = 80.0) -> List[Sample]:
+def make_party_layer(duration: float, sr: int, bpm: float = 84.0) -> List[Sample]:
     beat_len = 60.0 / bpm
     length = int(duration * sr)
     shimmer = [0.0] * length
     pulse = [0.0] * length
+    arp = [0.0] * length
 
     total_beats = int(duration / beat_len)
+    triad = [1.0, 1.2599, 1.4983]
     for beat in range(total_beats):
         start = int(beat * beat_len * sr)
         end = min(length, start + int(0.2 * beat_len * sr))
         for i in range(start, end):
             t = (i - start) / sr
             amp = env_adsr(t, (end - start) / sr, 0.01, 0.05, 0.6, 0.1)
-            shimmer[i] += math.sin(2.0 * math.pi * 880.0 * t) * amp * 0.15
-            shimmer[i] += math.sin(2.0 * math.pi * 1320.0 * t) * amp * 0.1
+            shimmer[i] += math.sin(2.0 * math.pi * 880.0 * t) * amp * 0.12
+            shimmer[i] += math.sin(2.0 * math.pi * 1320.0 * t) * amp * 0.08
 
     for beat in range(total_beats):
         start = int((beat + 0.5) * beat_len * sr)
@@ -284,7 +294,21 @@ def make_party_layer(duration: float, sr: int, bpm: float = 80.0) -> List[Sample
             amp = env_adsr(t, (end - start) / sr, 0.01, 0.08, 0.55, 0.1)
             pulse[i] += math.sin(2.0 * math.pi * 110.0 * t) * amp * 0.25
 
-    return normalize(mix([shimmer, pulse]), peak=0.8)
+    for step in range(total_beats * 2):
+        start = int(step * (beat_len / 2.0) * sr)
+        end = min(length, start + int(0.18 * beat_len * sr))
+        if start >= length:
+            break
+        idx = step % len(triad)
+        pitch = 523.25 * triad[idx] * (1.0 + 0.02 * (step % 4))
+        for i in range(start, end):
+            t = (i - start) / sr
+            amp = env_adsr(t, (end - start) / sr, 0.01, 0.05, 0.5, 0.08)
+            arp[i] += math.sin(2.0 * math.pi * pitch * t) * amp * 0.1
+
+    layered = mix([shimmer, pulse, arp])
+    layered = add_reverb(layered, sr, delay_s=0.11, decay=0.32)
+    return normalize(layered, peak=0.8)
 
 
 def generate_assets(

@@ -575,7 +575,7 @@ class AudioManager:
             self._stop_channel(AudioChannel.SFX_SECONDARY)
         elif cmd.state == AudioState.AMBIENT:
             # Play fire crackle as background loop, scaled by fire_intensity
-            volume = 0.18 + (self._fire_intensity * 0.42)  # Maps 0.0-1.0 to 0.18-0.6 volume
+            volume = 0.25 + (self._fire_intensity * 0.45)  # Maps 0.0-1.0 to 0.25-0.7 volume
             self.play_sfx(
                 "fire_crackle",
                 volume=volume,
@@ -583,20 +583,20 @@ class AudioManager:
                 channel=AudioChannel.SFX_AMBIENT,
             )
             self._stop_channel(AudioChannel.SFX_SECONDARY)
-            self.play_music("party_music", loop=True, volume=0.6)
+            self.play_music("party_music", loop=True, volume=0.55)
         elif cmd.state == AudioState.PARTY:
             # Keep the fire crackle as a warm bed under party music
-            volume = 0.18 + (self._fire_intensity * 0.42)
+            volume = 0.25 + (self._fire_intensity * 0.45)
             self.play_sfx(
                 "fire_crackle",
-                volume=min(volume, 0.35),
+                volume=min(volume, 0.5),
                 loop=True,
                 channel=AudioChannel.SFX_AMBIENT,
             )
-            self.play_music("party_music", loop=True, volume=0.7)
+            self.play_music("party_music", loop=True, volume=0.65)
             self.play_sfx(
                 "party_layer",
-                volume=0.7,
+                volume=0.6,
                 loop=True,
                 channel=AudioChannel.SFX_SECONDARY,
             )

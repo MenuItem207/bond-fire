@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import socket
 import sys
+import threading
+import time
+import json
 from typing import Tuple
 
+from .audio_manager import AudioManager, AudioState
+from .color_analysis import get_palette_from_people
 from .detector import BondFireVision
+from .packet_builder import PacketBuilderV2, Person
+from .state_machine import State, StateContext, StateMachine
 
 
 def _parse_roi(values: list[float]) -> Tuple[float, float, float, float]:
@@ -44,6 +52,11 @@ def main() -> None:
         "--no-display",
         action="store_true",
         help="Disable the OpenCV preview window (useful on headless devices).",
+    )
+    parser.add_argument(
+        "--manual-state",
+        action="store_true",
+        help="Run in manual state mode (CLI input instead of camera).",
     )
     parser.add_argument(
         "--broadcast-ip",
@@ -129,27 +142,222 @@ def main() -> None:
     if args.ai_prompts or args.ai_api_key or args.ai_interval or args.ai_model:
         print("Warning: OpenAI flags are ignored in v2. Using local prompts.", flush=True)
 
-    vision = BondFireVision(
-        model_path=args.model,
-        capture_index=args.camera_index,
-        roi=roi,
-        detection_confidence=args.confidence,
-        broadcast_ip=args.broadcast_ip,
-        broadcast_port=args.broadcast_port,
-        updates_per_second=args.updates_per_second,
-        pulse_interval=args.pulse_interval,
-        enable_audio=args.enable_audio,
-        audio_volume=args.audio_volume,
-        narration_enabled=args.narration_enabled,
-        tts_voice=args.tts_voice,
-    )
-
     try:
-        vision.run(display=not args.no_display)
+        if args.manual_state:
+            _run_manual_state(
+                broadcast_ip=args.broadcast_ip,
+                broadcast_port=args.broadcast_port,
+                updates_per_second=args.updates_per_second,
+                pulse_interval=args.pulse_interval,
+                enable_audio=args.enable_audio,
+                audio_volume=args.audio_volume,
+                narration_enabled=args.narration_enabled,
+                tts_voice=args.tts_voice,
+            )
+        else:
+            vision = BondFireVision(
+                model_path=args.model,
+                capture_index=args.camera_index,
+                roi=roi,
+                detection_confidence=args.confidence,
+                broadcast_ip=args.broadcast_ip,
+                broadcast_port=args.broadcast_port,
+                updates_per_second=args.updates_per_second,
+                pulse_interval=args.pulse_interval,
+                enable_audio=args.enable_audio,
+                audio_volume=args.audio_volume,
+                narration_enabled=args.narration_enabled,
+                tts_voice=args.tts_voice,
+            )
+            vision.run(display=not args.no_display)
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
+
+def _run_manual_state(
+    broadcast_ip: str,
+    broadcast_port: int,
+    updates_per_second: float,
+    pulse_interval: float,
+    enable_audio: bool,
+    audio_volume: float,
+    narration_enabled: bool,
+    tts_voice: str | None,
+) -> None:
+    send_interval = 1.0 / updates_per_second if updates_per_second > 0 else 0.1
+    sock = _create_socket(broadcast_ip, broadcast_port)
+    packet_builder = PacketBuilderV2()
+    state_machine = StateMachine(pulse_interval=pulse_interval)
+
+    audio_manager: AudioManager | None = None
+    if enable_audio:
+        audio_manager = AudioManager(
+            enabled=True,
+            master_volume=audio_volume,
+            narration_enabled=narration_enabled,
+            tts_voice=tts_voice,
+        )
+        audio_manager.start()
+
+    state_lock = threading.Lock()
+    manual_state = {
+        "people_count": 0,
+        "phone_detected": False,
+    }
+
+    def _set_state(people_count: int, phone_detected: bool) -> None:
+        with state_lock:
+            manual_state["people_count"] = people_count
+            manual_state["phone_detected"] = phone_detected
+
+    def _worker() -> None:
+        last_audio_state = AudioState.SILENT
+        colors = [
+            (255, 120, 60),
+            (200, 80, 40),
+            (255, 200, 80),
+            (120, 200, 255),
+            (180, 120, 255),
+        ]
+        while True:
+            now = time.monotonic()
+            with state_lock:
+                people_count = manual_state["people_count"]
+                phone_detected = manual_state["phone_detected"]
+
+            context = StateContext(
+                people_count=people_count,
+                phone_detected=phone_detected,
+                timestamp=now,
+            )
+            active_ids = set(range(1, people_count + 1))
+            state_output = state_machine.update(context, active_ids)
+            state = state_output.state
+
+            people = _make_people(people_count, colors)
+            people_colors = [p.shirt_rgb for p in people]
+            dominant_palette = get_palette_from_people(people_colors, max_colors=4)
+
+            mist_pwm = state_output.mist_pwm
+            fan_pwm = state_output.fan_pwm
+            fire_intensity = state_output.fire_intensity
+            prompt = f"{state.value}: {people_count} people"
+            if phone_detected:
+                prompt = "PHONE detected"
+
+            audio_state = _map_audio_state(state)
+            if audio_manager and audio_state != last_audio_state:
+                audio_manager.set_state(audio_state)
+                last_audio_state = audio_state
+            if audio_manager and audio_state in (AudioState.AMBIENT, AudioState.PARTY):
+                audio_manager.set_fire_intensity(fire_intensity)
+
+            packet = packet_builder.build(
+                state=state,
+                people=people,
+                phone_detected=phone_detected,
+                dominant_palette=dominant_palette,
+                prompt=prompt,
+                mist_pwm=mist_pwm,
+                fan_pwm=fan_pwm,
+                pulse_active=state_output.pulse_active,
+                entry_flash_id=state_output.entry_flash_id,
+                audio_state=audio_state,
+                party_buildup_progress=state_output.party_buildup_progress,
+                celebration=state_output.phone_just_exited,
+            )
+
+            try:
+                message = json.dumps(packet).encode("utf-8")
+                sock.sendto(message, (broadcast_ip, broadcast_port))
+            except OSError as exc:
+                print(f"Network Error: {exc}", flush=True)
+
+            time.sleep(send_interval)
+
+    worker_thread = threading.Thread(target=_worker, name="manual-state-worker", daemon=True)
+    worker_thread.start()
+
+    try:
+        while True:
+            _print_manual_menu()
+            choice = input("Select scenario: ").strip()
+            if choice == "1":
+                _set_state(0, False)
+            elif choice == "2":
+                _set_state(1, False)
+            elif choice == "3":
+                _set_state(3, False)
+            elif choice == "4":
+                _set_state(4, False)
+            elif choice == "5":
+                _set_state(5, False)
+            elif choice == "6":
+                _set_state(3, True)
+            elif choice == "7":
+                _set_state(3, False)
+            elif choice == "8":
+                break
+            else:
+                print("Invalid selection. Try again.", flush=True)
+    finally:
+        if audio_manager:
+            audio_manager.stop()
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _print_manual_menu() -> None:
+    print("\nManual State Mode")
+    print("1) IDLE (0 people)")
+    print("2) FIRE (1 person)")
+    print("3) FIRE (3 people)")
+    print("4) FIRE (4 people)")
+    print("5) PARTY (5 people)")
+    print("6) PHONE detected (3 people)")
+    print("7) PHONE removed (3 people)")
+    print("8) Quit")
+
+
+def _create_socket(broadcast_ip: str, broadcast_port: int) -> socket.socket:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    print(f"Broadcasting to {broadcast_ip}:{broadcast_port}...", flush=True)
+    return sock
+
+
+def _make_people(count: int, colors: list[tuple[int, int, int]]) -> list[Person]:
+    people: list[Person] = []
+    for idx in range(count):
+        color = colors[idx % len(colors)]
+        x = 0.2 + 0.15 * (idx % 4)
+        y = 0.3 + 0.2 * (idx // 4)
+        bbox = (x, y, min(x + 0.1, 0.95), min(y + 0.2, 0.95))
+        people.append(
+            Person(
+                id=idx + 1,
+                bbox=bbox,
+                shirt_rgb=color,
+                shirt_name="",
+            )
+        )
+    return people
+
+
+def _map_audio_state(state: State) -> AudioState:
+    if state == State.IDLE:
+        return AudioState.SILENT
+    if state == State.FIRE:
+        return AudioState.AMBIENT
+    if state == State.PARTY:
+        return AudioState.PARTY
+    if state == State.PHONE:
+        return AudioState.ALERT
+    return AudioState.SILENT
 
 if __name__ == "__main__":
     main()
