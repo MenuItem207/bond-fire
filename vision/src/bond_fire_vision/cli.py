@@ -11,8 +11,9 @@ import json
 from typing import Tuple
 
 from .audio_manager import AudioManager, AudioState
-from .color_analysis import get_palette_from_people
+from .color_analysis import are_colors_contrasting, get_palette_from_people
 from .detector import BondFireVision
+from .local_prompts import LocalPromptGenerator
 from .packet_builder import PacketBuilderV2, Person
 from .state_machine import State, StateContext, StateMachine
 
@@ -189,6 +190,7 @@ def _run_manual_state(
     sock = _create_socket(broadcast_ip, broadcast_port)
     packet_builder = PacketBuilderV2()
     state_machine = StateMachine(pulse_interval=pulse_interval)
+    prompt_generator = LocalPromptGenerator()
 
     audio_manager: AudioManager | None = None
     if enable_audio:
@@ -205,6 +207,9 @@ def _run_manual_state(
         "people_count": 0,
         "phone_detected": False,
     }
+    last_entry_id: int | None = None
+    celebration_frames_remaining = 0
+    celebration_prompt: str | None = None
 
     def _set_state(people_count: int, phone_detected: bool) -> None:
         with state_lock:
@@ -212,6 +217,9 @@ def _run_manual_state(
             manual_state["phone_detected"] = phone_detected
 
     def _worker() -> None:
+        nonlocal last_entry_id
+        nonlocal celebration_frames_remaining
+        nonlocal celebration_prompt
         last_audio_state = AudioState.SILENT
         last_log = 0.0
         colors = [
@@ -239,13 +247,36 @@ def _run_manual_state(
             people = _make_people(people_count, colors)
             people_colors = [p.shirt_rgb for p in people]
             dominant_palette = get_palette_from_people(people_colors, max_colors=4)
+            colors_contrasting = False
+            if len(people_colors) >= 2:
+                colors_contrasting = are_colors_contrasting(people_colors[0], people_colors[1])
 
             mist_pwm = state_output.mist_pwm
             fan_pwm = state_output.fan_pwm
             fire_intensity = state_output.fire_intensity
-            prompt = f"{state.value}: {people_count} people"
-            if phone_detected:
-                prompt = "PHONE detected"
+            if state_output.phone_just_exited:
+                prompt_generator.force_regenerate()
+                celebration_prompt = prompt_generator.get_phone_exit_prompt()
+                celebration_frames_remaining = 10
+                prompt = celebration_prompt
+            elif celebration_frames_remaining > 0:
+                celebration_frames_remaining -= 1
+                prompt = celebration_prompt or prompt_generator.get_phone_exit_prompt()
+            else:
+                celebration_prompt = None
+                if state_output.entry_flash_id and state_output.entry_flash_id != last_entry_id:
+                    prompt = prompt_generator.get_entry_prompt()
+                    last_entry_id = state_output.entry_flash_id
+                elif state_output.pulse_active:
+                    color_names = [p.shirt_name for p in people if p.shirt_name]
+                    prompt = prompt_generator.get_pulse_prompt(color_names)
+                else:
+                    prompt = prompt_generator.generate(
+                        state_output.state,
+                        people_count,
+                        len(set(p.shirt_rgb for p in people)),
+                        colors_contrasting,
+                    )
 
             audio_state = _map_audio_state(state)
             if audio_manager and audio_state != last_audio_state:
