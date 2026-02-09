@@ -3,7 +3,8 @@
 
 # State Machine - Phone Detection Thresholds (seconds)
 state_machine:
-  phone_entry_dwell: 1.0      # Instant phone detection (no debounce on entry)
+  fire_entry_dwell: 0.3       # Debounce IDLE -> FIRE to avoid single-frame flicker
+  phone_entry_dwell: 0.5      # Debounce PHONE entry to reduce false positives
   phone_exit_dwell: 0.5       # Hysteresis - phone must be absent for this duration to exit PHONE state
   frame_rate: 5               # FPS for celebration display and state timing
 

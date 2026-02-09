@@ -142,31 +142,45 @@ def make_buzzer(duration: float, sr: int) -> List[Sample]:
 
 
 def make_horn(duration: float, sr: int) -> List[Sample]:
-    base_freq = 220.0
-    phases = [random.uniform(0.0, math.pi * 2.0) for _ in range(4)]
-    env = [env_adsr(t, duration, 0.03, 0.25, 0.65, 0.3) for t in (i / sr for i in range(int(duration * sr)))]
+    base_freq = 260.0
+    phases = [random.uniform(0.0, math.pi * 2.0) for _ in range(3)]
+    env = [env_adsr(t, duration, 0.02, 0.18, 0.7, 0.25) for t in (i / sr for i in range(int(duration * sr)))]
 
     def _fn(t: float, i: int) -> float:
         v = 0.0
+        pitch = base_freq * (1.0 + 0.12 * (t / duration))
         for h, ph in enumerate(phases, start=1):
-            v += (1.0 / h) * math.sin(2.0 * math.pi * base_freq * h * t + ph)
-        return v * env[i] * 0.6
+            v += (1.0 / (h * 1.2)) * math.sin(2.0 * math.pi * pitch * h * t + ph)
+        return v * env[i] * 0.55
 
-    return normalize(render(duration, sr, _fn), peak=0.85)
+    return normalize(render(duration, sr, _fn), peak=0.8)
 
 
 def make_chime(duration: float, sr: int) -> List[Sample]:
-    base = 1046.5
-    ratios = [1.0, 2.01, 2.52, 3.98]
-    env = [env_exp_decay(t, duration, start=1.0, end=0.0006) for t in (i / sr for i in range(int(duration * sr)))]
+    length = int(duration * sr)
+    out = [0.0] * length
 
-    def _fn(t: float, i: int) -> float:
-        val = 0.0
-        for idx, r in enumerate(ratios, start=1):
-            val += (1.0 / (idx * 1.4)) * math.sin(2.0 * math.pi * base * r * t)
-        return val * env[i] * 0.4
+    ding_count = 3
+    ding_spacing = duration / (ding_count + 0.5)
+    ding_len = max(0.12, ding_spacing * 0.7)
+    base = 880.0
+    ratios = [1.0, 2.03, 2.57, 3.96]
 
-    return normalize(render(duration, sr, _fn), peak=0.65)
+    for idx in range(ding_count):
+        start_t = idx * ding_spacing
+        end_t = min(duration, start_t + ding_len)
+        start = int(start_t * sr)
+        end = int(end_t * sr)
+        pitch = base * (1.0 + idx * 0.18)
+        for i in range(start, end):
+            t = (i - start) / sr
+            env = env_exp_decay(t, (end - start) / sr, start=1.0, end=0.0008)
+            bell = 0.0
+            for r_i, r in enumerate(ratios, start=1):
+                bell += (1.0 / (r_i * 1.5)) * math.sin(2.0 * math.pi * pitch * r * t)
+            out[i] += bell * env * 0.45
+
+    return normalize(out, peak=0.6)
 
 
 def make_buildup_start(duration: float, sr: int) -> List[Sample]:
@@ -273,15 +287,22 @@ def make_party_layer(duration: float, sr: int, bpm: float = 80.0) -> List[Sample
     return normalize(mix([shimmer, pulse]), peak=0.8)
 
 
-def generate_assets(base_dir: Path, sr: int, music_duration: float, sfx_only: bool) -> None:
+def generate_assets(
+    base_dir: Path,
+    sr: int,
+    music_duration: float,
+    sfx_only: bool,
+    pulse_interval: float,
+) -> None:
     sfx_dir = base_dir / "sfx"
     music_dir = base_dir / "music"
 
+    chime_duration = max(0.5, min(1.2, pulse_interval * 0.06))
     assets = {
         "whoosh_entry.wav": make_whoosh(1.2, sr),
         "buzzer_alert.wav": make_buzzer(0.7, sr),
         "party_horn.wav": make_horn(1.2, sr),
-        "soft_chime.wav": make_chime(1.0, sr),
+        "soft_chime.wav": make_chime(chime_duration, sr),
         "buildup_start.wav": make_buildup_start(1.2, sr),
         "buildup_pulse.wav": make_buildup_pulse(0.9, sr),
         "supernova_burst.wav": make_supernova(1.5, sr),
@@ -312,6 +333,12 @@ def main() -> None:
         help="Party music duration in seconds (shorter renders faster)",
     )
     parser.add_argument(
+        "--pulse-interval",
+        type=float,
+        default=15.0,
+        help="Pulse interval in seconds (scales chime duration)",
+    )
+    parser.add_argument(
         "--sfx-only",
         action="store_true",
         help="Generate SFX only (skip party music)",
@@ -319,7 +346,13 @@ def main() -> None:
     args = parser.parse_args()
 
     assets_dir = Path(args.assets_dir)
-    generate_assets(assets_dir, args.sample_rate, args.music_duration, args.sfx_only)
+    generate_assets(
+        assets_dir,
+        args.sample_rate,
+        args.music_duration,
+        args.sfx_only,
+        args.pulse_interval,
+    )
     print(f"Generated assets in {assets_dir}")
 
 

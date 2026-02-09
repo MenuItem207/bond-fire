@@ -19,8 +19,12 @@ export BOND_FIRE_CONFIG=/path/to/config.yaml
 
 Controls phone detection timing:
 
+- **`fire_entry_dwell`** (seconds): Delay before entering FIRE after first person is seen
+  - Default: `0.3`
+  - Increase to reduce single-frame person flicker
+
 - **`phone_entry_dwell`** (seconds): Delay before recognizing phone entry
-  - Default: `0.0` (instant detection)
+  - Default: `0.5`
   - Increase to reduce false positives
 
 - **`phone_exit_dwell`** (seconds): How long phone must be absent before exiting PHONE state
@@ -142,6 +146,7 @@ celebration:
 ### More Conservative Detection
 ```yaml
 state_machine:
+  fire_entry_dwell: 0.3       # Require brief person presence before FIRE
   phone_entry_dwell: 0.2      # Wait 200ms before confirming phone detection
   phone_exit_dwell: 1.0       # More stable - require 1 second of absence
 vision:
@@ -168,7 +173,7 @@ debug:
 Set the config path via environment variable:
 ```bash
 export BOND_FIRE_CONFIG=~/.config/bond-fire/config.yaml
-python -m bond_fire_vision.cli --video 0
+python -m bond_fire_vision.cli --camera-index 0
 ```
 
 ## Reloading Configuration

@@ -11,6 +11,7 @@ import yaml
 @dataclass
 class StateConfig:
     """State machine configuration."""
+    fire_entry_dwell: float
     phone_entry_dwell: float
     phone_exit_dwell: float
     frame_rate: int
@@ -129,6 +130,7 @@ def _parse_config(data: dict) -> Config:
     """Parse raw config dictionary into Config dataclass."""
     return Config(
         state_machine=StateConfig(
+            fire_entry_dwell=data["state_machine"].get("fire_entry_dwell", 0.0),
             phone_entry_dwell=data["state_machine"]["phone_entry_dwell"],
             phone_exit_dwell=data["state_machine"]["phone_exit_dwell"],
             frame_rate=data["state_machine"]["frame_rate"],

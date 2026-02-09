@@ -44,18 +44,18 @@ Features enabled:
 
 ## ⚙️ Essential Flags
 
-| Flag | Purpose | Example | Default |
-|------|---------|---------|---------|
-| `--camera-index` | Video input device | `0` (built-in) | Required |
-| `--enable-audio` | Activate audio system | (no value) | Disabled |
-| `--narration-enabled` | Add TTS narration | (no value) | Off |
-| `--tts-voice` | Voice name | `"daniel"` | Auto-select |
-| `--roi` | Active detection zone | `0.15 0.25 0.85 0.9` | Full frame |
-| `--confidence` | Detection threshold | `0.6` | 0.5 |
-| `--no-display` | Run headless (no preview) | (no value) | Display on |
-| `--broadcast-ip` | UDP destination | `255.255.255.255` | Broadcast |
-| `--broadcast-port` | UDP port | `4210` | 4210 |
-| `--updates-per-second` | Broadcast rate | `30` | 30 |
+| Flag                   | Purpose                   | Example              | Default     |
+| ---------------------- | ------------------------- | -------------------- | ----------- |
+| `--camera-index`       | Video input device        | `0` (built-in)       | Required    |
+| `--enable-audio`       | Activate audio system     | (no value)           | Disabled    |
+| `--narration-enabled`  | Add TTS narration         | (no value)           | Off         |
+| `--tts-voice`          | Voice name                | `"daniel"`           | Auto-select |
+| `--roi`                | Active detection zone     | `0.15 0.25 0.85 0.9` | Full frame  |
+| `--confidence`         | Detection threshold       | `0.6`                | 0.5         |
+| `--no-display`         | Run headless (no preview) | (no value)           | Display on  |
+| `--broadcast-ip`       | UDP destination           | `255.255.255.255`    | Broadcast   |
+| `--broadcast-port`     | UDP port                  | `4210`               | 4210        |
+| `--updates-per-second` | Broadcast rate            | `30`                 | 30          |
 
 ### Common Scenarios
 
@@ -87,6 +87,8 @@ All timing and parameter values are in `vision/config.yaml`:
 
 ```yaml
 state_machine:
+  fire_entry_dwell: 0.3       # Debounce IDLE -> FIRE
+  phone_entry_dwell: 0.5      # Debounce PHONE entry
   phone_exit_dwell: 0.5       # Hysteresis (seconds)
 prompts:
   normal_cooldown: 10         # Min time between prompts

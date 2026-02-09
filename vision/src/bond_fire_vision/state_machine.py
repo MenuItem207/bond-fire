@@ -87,6 +87,7 @@ class StateMachine:
 
         # Load phone detection timings from config
         cfg = get_config()
+        self.FIRE_ENTRY_DWELL = cfg.state_machine.fire_entry_dwell
         self.PHONE_ENTRY_DWELL = cfg.state_machine.phone_entry_dwell
         self.PHONE_EXIT_DWELL = cfg.state_machine.phone_exit_dwell
 
@@ -99,6 +100,8 @@ class StateMachine:
         self._last_pulse_time: Optional[float] = None
         self._entry_flash_until: Optional[float] = None
         self._entry_flash_id: Optional[int] = None
+        self._fire_entry_start: Optional[float] = None
+        self._phone_entry_start: Optional[float] = None
 
         # Tracking
         self._last_people_count = 0
@@ -133,10 +136,22 @@ class StateMachine:
         # PHONE state has highest priority (preempts everything)
         if phone:
             if self.state != State.PHONE:
-                print(f"📱 Phone detected! Entering PHONE state from {self.state.value}", flush=True)
-                self.previous_state = self.state
-                self._change_state(State.PHONE, now)
-                self._phone_just_exited = False
+                if self.PHONE_ENTRY_DWELL <= 0:
+                    print(f"📱 Phone detected! Entering PHONE state from {self.state.value}", flush=True)
+                    self.previous_state = self.state
+                    self._change_state(State.PHONE, now)
+                    self._phone_just_exited = False
+                    self._phone_entry_start = None
+                elif self._phone_entry_start is None:
+                    self._phone_entry_start = now
+                elif now - self._phone_entry_start >= self.PHONE_ENTRY_DWELL:
+                    print(f"📱 Phone detected! Entering PHONE state from {self.state.value}", flush=True)
+                    self.previous_state = self.state
+                    self._change_state(State.PHONE, now)
+                    self._phone_just_exited = False
+                    self._phone_entry_start = None
+            else:
+                self._phone_entry_start = None
             self._phone_exit_start = None
         elif self.state == State.PHONE:
             # Phone just disappeared, start exit timer
@@ -149,6 +164,8 @@ class StateMachine:
                 self._change_state(self.previous_state, now)
                 self._phone_exit_start = None
                 self._phone_just_exited = True  # Flag celebration
+        else:
+            self._phone_entry_start = None
 
         # Evaluate non-PHONE states
         if self.state != State.PHONE:
@@ -163,7 +180,16 @@ class StateMachine:
 
             # FIRE/PARTY transitions
             if self.state == State.IDLE and people_count > 0:
-                self._change_state(State.FIRE, now)
+                if self.FIRE_ENTRY_DWELL <= 0:
+                    self._change_state(State.FIRE, now)
+                    self._fire_entry_start = None
+                elif self._fire_entry_start is None:
+                    self._fire_entry_start = now
+                elif now - self._fire_entry_start >= self.FIRE_ENTRY_DWELL:
+                    self._change_state(State.FIRE, now)
+                    self._fire_entry_start = None
+            elif people_count == 0:
+                self._fire_entry_start = None
 
             elif self.state == State.FIRE:
                 # Check for PARTY entry
@@ -246,6 +272,8 @@ class StateMachine:
         # Reset state-specific timers
         self._party_dwell_start = None
         self._party_exit_start = None
+        self._fire_entry_start = None
+        self._phone_entry_start = None
         self._phone_exit_start = None
 
         # Reset pulse timer on state entry
@@ -343,6 +371,8 @@ class StateMachine:
         self._idle_start = None
         self._party_dwell_start = None
         self._party_exit_start = None
+        self._fire_entry_start = None
+        self._phone_entry_start = None
         self._phone_exit_start = None
         self._last_pulse_time = None
         self._entry_flash_until = None
