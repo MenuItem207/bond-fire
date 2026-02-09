@@ -44,6 +44,7 @@ vision:
   confidence_threshold: 0.5   # YOLO detection confidence (0.0 to 1.0)
   person_class_id: 0          # COCO dataset person class
   phone_class_id: 67          # COCO dataset cell phone class
+  min_person_area_ratio: 0.15 # Min person bbox area as fraction of frame area
 
 # Development/Debugging
 debug:

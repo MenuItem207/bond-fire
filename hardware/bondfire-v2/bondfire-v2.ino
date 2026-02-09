@@ -727,8 +727,7 @@ uint16_t getMatrixTextColor() {
 
   switch (currentStateConfig.state) {
     case STATE_IDLE: {
-      uint8_t glow = beatsin8(9, 50, 170);
-      color = CHSV(160, 180, glow);
+      color = CHSV(160, 180, 170);
       break;
     }
     case STATE_FIRE:

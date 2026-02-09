@@ -40,7 +40,7 @@ def main() -> None:
         "--roi",
         type=float,
         nargs=4,
-        default=(0.2, 0.2, 0.8, 0.8),
+        default=(0.0, 0.0, 1.0, 1.0),
         metavar=("X_MIN", "Y_MIN", "X_MAX", "Y_MAX"),
         help="Active zone bounds as normalized floats.",
     )

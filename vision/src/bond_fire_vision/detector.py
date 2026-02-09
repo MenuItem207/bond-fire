@@ -40,8 +40,9 @@ class BondFireVision:
         self,
         model_path: str = "yolov8n.pt",
         capture_index: int = 0,
-        roi: Tuple[float, float, float, float] = (0.2, 0.2, 0.8, 0.8),
+        roi: Tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
         detection_confidence: float = 0.5,
+        person_confidence: float = 0.6,
         broadcast_ip: str = "255.255.255.255",
         broadcast_port: int = 4210,
         updates_per_second: float = 60.0,
@@ -67,6 +68,7 @@ class BondFireVision:
             capture_index: Camera index
             roi: Active zone (x_min, y_min, x_max, y_max) normalized 0-1
             detection_confidence: Minimum detection confidence
+            person_confidence: Minimum detection confidence for people
             broadcast_ip: UDP broadcast IP
             broadcast_port: UDP port
             updates_per_second: Target packet rate
@@ -77,11 +79,13 @@ class BondFireVision:
         """
         self._validate_roi(roi)
         self._validate_confidence(detection_confidence)
+        self._validate_confidence(person_confidence)
 
         self.model = YOLO(model_path)
         self.capture_index = capture_index
         self.roi = roi
         self.detection_confidence = detection_confidence
+        self.person_confidence = max(detection_confidence, person_confidence)
         self.cap: cv2.VideoCapture | None = None
         self.broadcast_ip = broadcast_ip
         self.broadcast_port = broadcast_port
@@ -98,6 +102,7 @@ class BondFireVision:
         self._celebration_duration = cfg.celebration.duration_frames / frame_rate
         self._celebration_until: Optional[float] = None
         self._same_state_cooldown = cfg.prompts.same_state_cooldown
+        self._min_person_area_ratio = max(0.0, cfg.vision.min_person_area_ratio)
 
         if enable_audio:
             self.audio_manager = AudioManager(
@@ -215,13 +220,15 @@ class BondFireVision:
             for box, track_id in zip(result.boxes, result.boxes.id):
                 cls = int(box.cls[0])
                 conf = float(box.conf[0])
-                if conf < self.detection_confidence:
-                    continue
-
                 x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
                 tid = int(track_id)
 
                 if cls == self.CLASS_PERSON:
+                    if conf < self.person_confidence:
+                        continue
+                    box_area_ratio = ((x2 - x1) * (y2 - y1)) / max(1.0, (width * height))
+                    if box_area_ratio < self._min_person_area_ratio:
+                        continue
                     inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
                     if inside:
                         person_count += 1
@@ -251,6 +258,8 @@ class BondFireVision:
                             cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                             
                 elif cls == self.CLASS_PHONE:
+                    if conf < self.detection_confidence:
+                        continue
                     inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
                     if inside:
                         phone_detected = True

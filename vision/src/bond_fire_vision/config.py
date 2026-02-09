@@ -56,6 +56,7 @@ class VisionConfig:
     confidence_threshold: float
     person_class_id: int
     phone_class_id: int
+    min_person_area_ratio: float
 
 
 @dataclass
@@ -160,6 +161,7 @@ def _parse_config(data: dict) -> Config:
             confidence_threshold=data["vision"]["confidence_threshold"],
             person_class_id=data["vision"]["person_class_id"],
             phone_class_id=data["vision"]["phone_class_id"],
+            min_person_area_ratio=data["vision"].get("min_person_area_ratio", 0.01),
         ),
         debug=DebugConfig(
             verbose_logging=data["debug"]["verbose_logging"],
