@@ -22,6 +22,7 @@ class PromptsConfig:
     """Prompt generation configuration."""
     normal_cooldown: float
     phone_cooldown: float
+    same_state_cooldown: float
 
 
 @dataclass
@@ -138,6 +139,7 @@ def _parse_config(data: dict) -> Config:
         prompts=PromptsConfig(
             normal_cooldown=data["prompts"]["normal_cooldown"],
             phone_cooldown=data["prompts"]["phone_cooldown"],
+            same_state_cooldown=data["prompts"].get("same_state_cooldown", data["prompts"]["normal_cooldown"] * 1.5),
         ),
         celebration=CelebrationConfig(
             duration_frames=data["celebration"]["duration_frames"],

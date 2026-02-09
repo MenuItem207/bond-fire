@@ -10,6 +10,7 @@ import cv2
 from ultralytics import YOLO
 
 from .audio_manager import AudioManager, AudioState
+from .config import get_config
 from .color_analysis import (
     are_colors_contrasting,
     extract_dominant_color,
@@ -92,6 +93,12 @@ class BondFireVision:
         self.packet_builder = PacketBuilderV2()
         self.audio_manager: Optional[AudioManager] = None
 
+        cfg = get_config()
+        frame_rate = max(1, cfg.state_machine.frame_rate)
+        self._celebration_duration = cfg.celebration.duration_frames / frame_rate
+        self._celebration_until: Optional[float] = None
+        self._same_state_cooldown = cfg.prompts.same_state_cooldown
+
         if enable_audio:
             self.audio_manager = AudioManager(
                 enabled=True,
@@ -106,11 +113,12 @@ class BondFireVision:
         self._last_entry_id: Optional[int] = None
         self._party_buildup_started = False
         self._last_buildup_step = 0
-        self._celebration_frames_remaining = 0  # Track celebration visibility (10 frames = ~2 sec @ 5fps)
+        self._celebration_frames_remaining = 0  # Deprecated: time-based celebration is used instead
         self._celebration_prompt: Optional[str] = None  # Store celebration prompt to avoid toggling
         self._latest_state_output: Optional[Any] = None  # Cache latest state output for packet building
         self._last_narrated_prompt: Optional[str] = None  # Track last narrated prompt to avoid repeats
         self._last_sent_prompt: Optional[str] = None  # Cache prompt to prevent unnecessary resets
+        self._last_prompt_state: Optional[State] = None
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -360,26 +368,24 @@ class BondFireVision:
         if state_output.phone_just_exited:
             print(f"📥 Detector received phone_just_exited=True", flush=True)
         
-        # Handle phone exit celebration
+        # Handle phone exit celebration (time-based)
         celebration_prompt = None
         if state_output.phone_just_exited:
-            # Phone was just removed - celebrate! Show for 10 frames (~2 sec @ 5fps)
+            # Phone was just removed - celebrate for configured duration
             # Clear any cached prompts so we don't show stale PHONE prompts after celebration
             self.prompt_generator.force_regenerate()
             self._celebration_prompt = self.prompt_generator.get_phone_exit_prompt()
             celebration_prompt = self._celebration_prompt
-            self._celebration_frames_remaining = 10
+            self._celebration_until = timestamp + self._celebration_duration
             print(f"🎉 CELEBRATION! Phone removed: '{celebration_prompt}'", flush=True)
             if self.audio_manager:
                 self.audio_manager.play_sfx("party_horn", volume=0.7)
-        elif self._celebration_frames_remaining > 0:
-            # Still in celebration phase - reuse same celebration prompt
-            self._celebration_frames_remaining -= 1
+        elif self._celebration_until is not None and timestamp < self._celebration_until:
             celebration_prompt = self._celebration_prompt
-            print(f"  🎊 Celebration frame {10 - self._celebration_frames_remaining}/10", flush=True)
         else:
             # Celebration ended, clear stored prompt
             self._celebration_prompt = None
+            self._celebration_until = None
         
         # Use celebration prompt if in celebration mode, otherwise normal logic
         if celebration_prompt is not None:
@@ -408,12 +414,18 @@ class BondFireVision:
                 self.audio_manager.play_sfx("chime", volume=0.3)
         else:
             # Normal prompt
+            cooldown_override = None
+            if self._last_prompt_state == state_output.state:
+                cooldown_override = self._same_state_cooldown
             prompt = self.prompt_generator.generate(
                 state_output.state,
                 len(people),
                 len(set(p.shirt_rgb for p in people)),
                 colors_contrasting,
+                cooldown_override=cooldown_override,
             )
+
+        self._last_prompt_state = state_output.state
 
         # Narrate prompts when they change
         if self.audio_manager and self.audio_manager.narration_enabled:
@@ -454,7 +466,7 @@ class BondFireVision:
             self._last_buildup_step = buildup_step
 
         # Build packet
-        is_celebrating = state_output.phone_just_exited or self._celebration_frames_remaining > 0
+        is_celebrating = self._celebration_until is not None and timestamp < self._celebration_until
         packet = self.packet_builder.build(
             state=state_output.state,
             people=people,

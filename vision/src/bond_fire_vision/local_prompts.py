@@ -144,6 +144,7 @@ class LocalPromptGenerator:
         people_count: int,
         color_count: Optional[int] = None,
         colors_contrasting: bool = False,
+        cooldown_override: Optional[float] = None,
     ) -> str:
         """
         Generate a prompt for the current state.
@@ -161,6 +162,8 @@ class LocalPromptGenerator:
         now = time.monotonic()
         # Use shorter cooldown for PHONE state (2 sec) vs normal (8 sec)
         active_cooldown = self._phone_cooldown if state == State.PHONE else self._prompt_cooldown
+        if cooldown_override is not None:
+            active_cooldown = max(active_cooldown, cooldown_override)
         if (self._current_prompt is not None and 
             (now - self._last_prompt_time) < active_cooldown):
             return self._current_prompt
@@ -208,6 +211,25 @@ class LocalPromptGenerator:
         self._last_prompt_time = now
 
         return prompt
+
+    def is_cooldown_active(self, state: State, cooldown_override: Optional[float] = None) -> bool:
+        """
+        Check whether the prompt cooldown is still active.
+
+        Args:
+            state: Current installation state
+            cooldown_override: Optional override to enforce a longer cooldown
+
+        Returns:
+            True if cooldown is active, otherwise False
+        """
+        if self._current_prompt is None:
+            return False
+        now = time.monotonic()
+        active_cooldown = self._phone_cooldown if state == State.PHONE else self._prompt_cooldown
+        if cooldown_override is not None:
+            active_cooldown = max(active_cooldown, cooldown_override)
+        return (now - self._last_prompt_time) < active_cooldown
 
     def get_entry_prompt(self, person_color_name: Optional[str] = None) -> str:
         """

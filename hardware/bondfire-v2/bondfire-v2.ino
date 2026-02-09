@@ -118,14 +118,24 @@ int scrollX = 32;  // Start at matrix width
 uint8_t scrollCounter = 0;
 const uint8_t SCROLL_SPEED_NORMAL = 3;  // Every 3 frames (~33ms per pixel)
 const uint8_t SCROLL_SPEED_FAST = 1;    // Every frame (~10ms per pixel)
-bool shouldSpeedUpToExit = false;  // Speed up if scrollingText != stateText (out of sync)
 bool isTextFullyVisible = true;  // Track if current text is fully rendered on screen
+unsigned long textHoldUntil = 0;  // Hold text on screen for readability
+const unsigned long TEXT_HOLD_MS = 0;  // Minimum dwell when fully visible (0 disables pause)
+const unsigned long MIN_VISIBLE_BEFORE_FAST_MS = 0;  // Visible time before fast-exit
+unsigned long lastPromptAt = 0;  // Track when a prompt was last received
+const unsigned long PROMPT_STALE_MS = 2000;  // Allow state fallback if no prompt
+bool pendingTextReady = false;  // New text queued from master or state fallback
+bool holdAppliedForCurrentText = false;  // Ensure hold happens once per text
+bool speedUpToExit = false;  // Speed up when a new prompt is queued
+unsigned long visibleSince = 0;  // Track when current text became visible
 
 // Special Effects Timers
 unsigned long entryFlashUntil = 0;
 CRGB entryFlashColor;
 float rainbowPhase = 0.0f;
 float pulsePhase = 0.0f;
+unsigned long celebrationUntil = 0;
+const unsigned long CELEBRATION_MS = 1500;
 
 // State Change Transition Effect
 DisplayState lastStateRendered = STATE_IDLE;
@@ -338,10 +348,17 @@ void handlePacket() {
   const char* prompt = doc["prompt"];
   if (prompt) {
     String nextPrompt = String(prompt);
-    if (nextPrompt != scrollingText) {
-      scrollingText = nextPrompt;
-      scrollX = matrixFront.width();  // Reset scroll position only on change
+    lastPromptAt = millis();
+    if (nextPrompt != stateText) {
+      stateText = nextPrompt;
+      pendingTextReady = true;
     }
+  }
+
+  // --- Parse Celebration Flag ---
+  bool celebration = doc["celebration"] | false;
+  if (celebration) {
+    celebrationUntil = millis() + CELEBRATION_MS;
   }
 
   // --- Handle Entry Flash ---
@@ -414,34 +431,27 @@ void applyStateEffects() {
     colorTransitionStart = now;
     pendingStateColor = candidateState;
     
-    // Determine what text SHOULD be displayed for new state
-    String newStateText = "";
-    switch (candidateState) {
-      case STATE_IDLE:
-        newStateText = "Waiting...";
-        break;
-      case STATE_FIRE:
-        newStateText = String(currentStateConfig.mist_pwm);
-        break;
-      case STATE_PARTY:
-        newStateText = "PARTY!";
-        break;
-      case STATE_PHONE:
-        newStateText = "Phone detected";
-        break;
-    }
-    
-    // Queue new text ONLY if:
-    // 1. It's different from last queued text (ignore duplicates)
-    // 2. Current text is fully rendered AND fully visible on screen
-    if (newStateText != lastStateText && scrollingText == stateText && isTextFullyVisible) {
-      stateText = newStateText;
-      lastStateText = newStateText;
-      
-      // Speed up ONLY if currently displayed text doesn't match the new state text
-      if (scrollingText != stateText) {
-        shouldSpeedUpToExit = true;
-        scrollCounter = 0;  // Reset for immediate speed-up next frame
+    // Determine fallback text ONLY if prompts have gone stale
+    if (now - lastPromptAt > PROMPT_STALE_MS) {
+      String newStateText = "";
+      switch (candidateState) {
+        case STATE_IDLE:
+          newStateText = "Waiting...";
+          break;
+        case STATE_FIRE:
+          newStateText = "Warming up...";
+          break;
+        case STATE_PARTY:
+          newStateText = "PARTY!";
+          break;
+        case STATE_PHONE:
+          newStateText = "Phone detected";
+          break;
+      }
+      if (newStateText != lastStateText) {
+        stateText = newStateText;
+        lastStateText = newStateText;
+        pendingTextReady = true;
       }
     }
   }
@@ -506,8 +516,10 @@ void renderStateEffects() {
       break;
   }
 
-  // Handle entry flash overlay (highest priority)
-  if (millis() < entryFlashUntil) {
+  // Celebration overlay has highest priority
+  if (millis() < celebrationUntil) {
+    renderCelebrationEffect();
+  } else if (millis() < entryFlashUntil) {
     renderEntryFlash();
   }
 }
@@ -646,6 +658,19 @@ void renderEntryFlash() {
   }
 }
 
+/**
+ * CELEBRATION: Short rainbow burst overlay
+ * Triggered when celebration flag is received
+ */
+void renderCelebrationEffect() {
+  uint8_t beat = beatsin8(12, 80, 255);
+  uint8_t baseHue = (millis() / 10) % 255;
+
+  for (int i = 0; i < NUM_LEDS_RING; i++) {
+    ringLeds[i] = CHSV(baseHue + (i * 6), 255, beat);
+  }
+}
+
 
 // ===== SECTION 8: MATRIX DISPLAY =====
 
@@ -682,12 +707,20 @@ void updateMatrixDisplay() {
   // TEXT SCROLL: Smart queue-based logic
   // Calculate text width for exit/visibility detection
   int textWidthPixels = scrollingText.length() * 6;  // ~6 pixels per character
-  
-  // Speed up ONLY if scrollingText != stateText (text out of sync with state)
-  uint8_t scrollSpeed = SCROLL_SPEED_NORMAL;
-  if (shouldSpeedUpToExit) {
-    scrollSpeed = SCROLL_SPEED_FAST;  // Speed up to clear old text and show current state text
+
+  unsigned long now = millis();
+  if (pendingTextReady && scrollingText != stateText) {
+    speedUpToExit = true;
   }
+
+  if (!speedUpToExit && TEXT_HOLD_MS > 0 && textHoldUntil > 0) {
+    if (now < textHoldUntil) {
+      return;  // Hold text on screen for readability
+    }
+    textHoldUntil = 0;
+  }
+
+  uint8_t scrollSpeed = speedUpToExit ? SCROLL_SPEED_FAST : SCROLL_SPEED_NORMAL;
   
   if (++scrollCounter >= scrollSpeed) {
     scrollCounter = 0;
@@ -698,8 +731,14 @@ void updateMatrixDisplay() {
       // Current text has completely exited - now switch to stateText
       scrollX = matrixFront.width();  // Reset position to right edge
       scrollingText = stateText;       // Switch to the new text
+      if (pendingTextReady) {
+        pendingTextReady = false;
+      }
+      speedUpToExit = false;
       isTextFullyVisible = false;      // Mark new text as entering (not yet fully visible)
-      // Keep shouldSpeedUpToExit TRUE if still needed (will be cleared in PART 2)
+      holdAppliedForCurrentText = false;
+      textHoldUntil = 0;
+      visibleSince = 0;
     }
     
     // PART 2: Track when new text is FULLY visible on screen
@@ -712,12 +751,19 @@ void updateMatrixDisplay() {
       if (scrollX <= 0 && textRightEdge >= matrixFront.width()) {
         // Text is spanning the full width - it's readable but still scrolling
         isTextFullyVisible = true;
-        shouldSpeedUpToExit = false;  // Stop speeding up, return to normal scroll
       } else if (scrollX < 0 && textRightEdge > 0) {
         // Text is at least partially visible
         isTextFullyVisible = true;
-        shouldSpeedUpToExit = false;  // Return to normal speed
       }
+    }
+
+    if (!speedUpToExit && TEXT_HOLD_MS > 0 && isTextFullyVisible && !holdAppliedForCurrentText) {
+      if (visibleSince == 0) {
+        visibleSince = now;
+      }
+      textHoldUntil = now + TEXT_HOLD_MS;
+      holdAppliedForCurrentText = true;
+      return;
     }
     
     // PART 3: Detect when text has COMPLETELY exited on the left

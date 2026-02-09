@@ -10,8 +10,9 @@ state_machine:
 
 # Prompt Generation - Cooldown Durations (seconds)
 prompts:
-  normal_cooldown: 8          # Minimum time between prompts in non-phone states
-  phone_cooldown: 2           # Minimum time between prompts while phone is detected (faster)
+  normal_cooldown: 22         # Minimum time between prompts in non-phone states
+  phone_cooldown: 22          # Minimum time between prompts while phone is detected
+  same_state_cooldown: 22     # Minimum time between prompts when state is unchanged
   
 # Celebration Effect - Phone Exit Celebration
 celebration:

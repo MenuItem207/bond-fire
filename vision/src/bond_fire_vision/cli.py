@@ -13,6 +13,7 @@ from typing import Tuple
 from .audio_manager import AudioManager, AudioState
 from .color_analysis import are_colors_contrasting, get_palette_from_people
 from .detector import BondFireVision
+from .config import get_config
 from .local_prompts import LocalPromptGenerator
 from .packet_builder import PacketBuilderV2, Person
 from .state_machine import State, StateContext, StateMachine
@@ -191,6 +192,8 @@ def _run_manual_state(
     packet_builder = PacketBuilderV2()
     state_machine = StateMachine(pulse_interval=pulse_interval)
     prompt_generator = LocalPromptGenerator()
+    cfg = get_config()
+    same_state_cooldown = cfg.prompts.same_state_cooldown
 
     audio_manager: AudioManager | None = None
     if enable_audio:
@@ -210,6 +213,7 @@ def _run_manual_state(
     last_entry_id: int | None = None
     celebration_frames_remaining = 0
     celebration_prompt: str | None = None
+    last_prompt_state: State | None = None
 
     def _set_state(people_count: int, phone_detected: bool) -> None:
         with state_lock:
@@ -220,6 +224,7 @@ def _run_manual_state(
         nonlocal last_entry_id
         nonlocal celebration_frames_remaining
         nonlocal celebration_prompt
+        nonlocal last_prompt_state
         last_audio_state = AudioState.SILENT
         last_log = 0.0
         colors = [
@@ -264,7 +269,19 @@ def _run_manual_state(
                 prompt = celebration_prompt or prompt_generator.get_phone_exit_prompt()
             else:
                 celebration_prompt = None
-                if state_output.entry_flash_id and state_output.entry_flash_id != last_entry_id:
+                same_state_hold = (
+                    last_prompt_state == state
+                    and prompt_generator.is_cooldown_active(state, cooldown_override=same_state_cooldown)
+                )
+                if same_state_hold:
+                    prompt = prompt_generator.generate(
+                        state_output.state,
+                        people_count,
+                        len(set(p.shirt_rgb for p in people)),
+                        colors_contrasting,
+                        cooldown_override=same_state_cooldown,
+                    )
+                elif state_output.entry_flash_id and state_output.entry_flash_id != last_entry_id:
                     prompt = prompt_generator.get_entry_prompt()
                     last_entry_id = state_output.entry_flash_id
                 elif state_output.pulse_active:
@@ -276,7 +293,10 @@ def _run_manual_state(
                         people_count,
                         len(set(p.shirt_rgb for p in people)),
                         colors_contrasting,
+                        cooldown_override=same_state_cooldown if last_prompt_state == state else None,
                     )
+
+            last_prompt_state = state
 
             audio_state = _map_audio_state(state)
             if audio_manager and audio_state != last_audio_state:
