@@ -371,7 +371,7 @@ class BondFireVision:
             self._celebration_frames_remaining = 10
             print(f"🎉 CELEBRATION! Phone removed: '{celebration_prompt}'", flush=True)
             if self.audio_manager:
-                self.audio_manager.play_sfx("party_horn", volume=0.8)
+                self.audio_manager.play_sfx("party_horn", volume=0.7)
         elif self._celebration_frames_remaining > 0:
             # Still in celebration phase - reuse same celebration prompt
             self._celebration_frames_remaining -= 1
@@ -391,7 +391,7 @@ class BondFireVision:
             if person:
                 prompt = self.prompt_generator.get_entry_prompt(person.shirt_name)
                 if self.audio_manager:
-                    self.audio_manager.play_sfx("whoosh", volume=0.8)
+                    self.audio_manager.play_sfx("whoosh", volume=0.65)
             else:
                 prompt = self.prompt_generator.generate(
                     state_output.state,
@@ -405,7 +405,7 @@ class BondFireVision:
             color_names = [p.shirt_name for p in people]
             prompt = self.prompt_generator.get_pulse_prompt(color_names)
             if self.audio_manager:
-                self.audio_manager.play_sfx("chime", volume=0.4)
+                self.audio_manager.play_sfx("chime", volume=0.3)
         else:
             # Normal prompt
             prompt = self.prompt_generator.generate(
@@ -441,7 +441,7 @@ class BondFireVision:
         # Trigger build-up audio when party buildup starts
         if state_output.party_buildup_progress > 0.0 and not self._party_buildup_started:
             if self.audio_manager:
-                self.audio_manager.play_sfx("buildup_start", volume=0.9)
+                self.audio_manager.play_sfx("buildup_start", volume=0.75)
             self._party_buildup_started = True
         elif state_output.party_buildup_progress == 0.0:
             self._party_buildup_started = False
@@ -450,7 +450,7 @@ class BondFireVision:
         buildup_step = int(state_output.party_buildup_progress * 3)
         if buildup_step > self._last_buildup_step:
             if self.audio_manager and buildup_step in (1, 2):
-                self.audio_manager.play_sfx("buildup_pulse", volume=0.7)
+                self.audio_manager.play_sfx("buildup_pulse", volume=0.55)
             self._last_buildup_step = buildup_step
 
         # Build packet

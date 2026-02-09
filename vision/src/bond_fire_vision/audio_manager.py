@@ -37,6 +37,7 @@ class AudioChannel(Enum):
     """Audio playback channels."""
 
     MUSIC = "music"
+    SFX_AMBIENT = "sfx_ambient"
     SFX_PRIMARY = "sfx_primary"
     SFX_SECONDARY = "sfx_secondary"
     NARRATION = "narration"
@@ -88,6 +89,7 @@ class AudioManager:
         "buildup_pulse": "sfx/buildup_pulse.wav",  # Pulsing tone during build-up
         "supernova": "sfx/supernova_burst.wav",  # Explosion sound when party starts
         "party_music": "music/party_upbeat.wav",
+        "party_layer": "music/party_layer.wav",
     }
 
     def __init__(
@@ -117,6 +119,8 @@ class AudioManager:
         if master_volume is None:
             master_volume = cfg.audio.master_volume
         self.master_volume = max(0.0, min(1.0, master_volume))
+        self.sfx_volume = max(0.0, min(1.0, cfg.audio.sfx_volume))
+        self.music_volume = max(0.0, min(1.0, cfg.audio.music_volume))
         self.narration_enabled = narration_enabled and TTS_AVAILABLE
         self.tts_voice = tts_voice
 
@@ -152,6 +156,13 @@ class AudioManager:
             # Initialize pygame mixer
             mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
             mixer.set_num_channels(8)  # Ensure enough channels
+
+            # Reserve channels for consistent mixing
+            self._sfx_channels = {
+                AudioChannel.SFX_AMBIENT: mixer.Channel(0),
+                AudioChannel.SFX_PRIMARY: mixer.Channel(1),
+                AudioChannel.SFX_SECONDARY: mixer.Channel(2),
+            }
 
             # Initialize TTS if enabled
             if self.narration_enabled and TTS_AVAILABLE:
@@ -304,7 +315,13 @@ class AudioManager:
         except Exception as exc:
             print(f"TTS voice configuration error: {exc}", flush=True)
 
-    def play_sfx(self, asset_name: str, volume: float = 1.0) -> None:
+    def play_sfx(
+        self,
+        asset_name: str,
+        volume: float = 1.0,
+        loop: bool = False,
+        channel: AudioChannel = AudioChannel.SFX_PRIMARY,
+    ) -> None:
         """
         Play a sound effect (non-blocking).
 
@@ -319,8 +336,9 @@ class AudioManager:
             self._queue.put_nowait(
                 AudioCommand(
                     action="play",
-                    channel=AudioChannel.SFX_PRIMARY,
+                    channel=channel,
                     asset_name=asset_name,
+                    loop=loop,
                     volume=volume,
                 )
             )
@@ -408,13 +426,13 @@ class AudioManager:
         
         # If in AMBIENT state, update the fire crackle volume immediately
         if self._current_state == AudioState.AMBIENT:
-            volume = 0.2 + (intensity * 0.5)  # Maps 0.0-1.0 to 0.2-0.7 volume
+            volume = 0.18 + (intensity * 0.42)  # Maps 0.0-1.0 to 0.18-0.6 volume
             try:
                 # Queue a volume update for the fire crackle SFX
                 self._queue.put_nowait(
                     AudioCommand(
                         action="set_volume",
-                        channel=AudioChannel.SFX_PRIMARY,
+                        channel=AudioChannel.SFX_AMBIENT,
                         volume=volume,
                     )
                 )
@@ -436,6 +454,8 @@ class AudioManager:
                     self._handle_stop(cmd)
                 elif cmd.action == "set_state":
                     self._handle_state_change(cmd)
+                elif cmd.action == "set_volume":
+                    self._handle_set_volume(cmd)
             except Exception as exc:
                 print(f"Audio worker error: {exc}", flush=True)
             finally:
@@ -497,7 +517,7 @@ class AudioManager:
         sound = self._loaded_sounds.get(cmd.asset_name)
         if sound is None:
             return  # Asset failed to load previously
-        volume = cmd.volume * self.master_volume
+        volume = cmd.volume
 
         if cmd.channel == AudioChannel.MUSIC:
             # Use mixer.music for background tracks
@@ -508,26 +528,39 @@ class AudioManager:
                 return
             try:
                 mixer.music.load(str(asset_path))
-                mixer.music.set_volume(volume)
+                mixer.music.set_volume(self._apply_music_mix(volume))
                 mixer.music.play(loops=-1 if cmd.loop else 0)
             except Exception as exc:
                 print(f"❌ Music playback error for '{cmd.asset_name}': {exc}", flush=True)
         else:
             # Use channels for SFX
-            sound.set_volume(volume)
-            if cmd.loop:
-                sound.play(loops=-1)
+            channel = self._sfx_channels.get(cmd.channel)
+            effective_volume = self._apply_sfx_mix(volume)
+            if channel:
+                channel.set_volume(effective_volume)
+                channel.play(sound, loops=-1 if cmd.loop else 0)
             else:
-                sound.play()
+                sound.set_volume(effective_volume)
+                sound.play(loops=-1 if cmd.loop else 0)
 
     def _handle_stop(self, cmd: AudioCommand) -> None:
         """Handle stop command."""
         if cmd.channel == AudioChannel.MUSIC:
             mixer.music.stop()
-        elif cmd.channel in self._sfx_channels:
-            channel = self._sfx_channels[cmd.channel]
+        else:
+            channel = self._sfx_channels.get(cmd.channel)
             if channel:
                 channel.stop()
+
+    def _handle_set_volume(self, cmd: AudioCommand) -> None:
+        """Handle volume adjustment on a channel."""
+        if cmd.channel == AudioChannel.MUSIC:
+            mixer.music.set_volume(self._apply_music_mix(cmd.volume))
+            return
+
+        channel = self._sfx_channels.get(cmd.channel)
+        if channel:
+            channel.set_volume(self._apply_sfx_mix(cmd.volume))
 
     def _handle_state_change(self, cmd: AudioCommand) -> None:
         """Handle high-level state change."""
@@ -538,16 +571,52 @@ class AudioManager:
 
         if cmd.state == AudioState.SILENT:
             mixer.music.stop()
+            self._stop_channel(AudioChannel.SFX_AMBIENT)
+            self._stop_channel(AudioChannel.SFX_SECONDARY)
         elif cmd.state == AudioState.AMBIENT:
             # Play fire crackle as background loop, scaled by fire_intensity
-            volume = 0.2 + (self._fire_intensity * 0.5)  # Maps 0.0-1.0 to 0.2-0.7 volume
-            self.play_sfx("fire_crackle", volume=volume)
+            volume = 0.18 + (self._fire_intensity * 0.42)  # Maps 0.0-1.0 to 0.18-0.6 volume
+            self.play_sfx(
+                "fire_crackle",
+                volume=volume,
+                loop=True,
+                channel=AudioChannel.SFX_AMBIENT,
+            )
+            self._stop_channel(AudioChannel.SFX_SECONDARY)
+            self.play_music("party_music", loop=True, volume=0.6)
         elif cmd.state == AudioState.PARTY:
-            self.play_music("party_music", loop=True, volume=0.8)
-            self.play_sfx("party_horn", volume=1.0)
+            # Keep the fire crackle as a warm bed under party music
+            volume = 0.18 + (self._fire_intensity * 0.42)
+            self.play_sfx(
+                "fire_crackle",
+                volume=min(volume, 0.35),
+                loop=True,
+                channel=AudioChannel.SFX_AMBIENT,
+            )
+            self.play_music("party_music", loop=True, volume=0.7)
+            self.play_sfx(
+                "party_layer",
+                volume=0.7,
+                loop=True,
+                channel=AudioChannel.SFX_SECONDARY,
+            )
+            self.play_sfx("party_horn", volume=0.9)
         elif cmd.state == AudioState.ALERT:
             mixer.music.stop()
-            self.play_sfx("buzzer", volume=0.8)
+            self._stop_channel(AudioChannel.SFX_AMBIENT)
+            self._stop_channel(AudioChannel.SFX_SECONDARY)
+            self.play_sfx("buzzer", volume=0.45)
+
+    def _apply_sfx_mix(self, volume: float) -> float:
+        return max(0.0, min(1.0, volume * self.master_volume * self.sfx_volume))
+
+    def _apply_music_mix(self, volume: float) -> float:
+        return max(0.0, min(1.0, volume * self.master_volume * self.music_volume))
+
+    def _stop_channel(self, channel: AudioChannel) -> None:
+        sfx_channel = self._sfx_channels.get(channel)
+        if sfx_channel:
+            sfx_channel.stop()
 
 
 def create_placeholder_assets(assets_dir: Path) -> None:
