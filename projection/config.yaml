@@ -1,0 +1,75 @@
+window:
+  width: 1280
+  height: 720
+  fullscreen: false
+  vsync: true
+mapping:
+  quad:
+    - [0.10, 0.10]
+    - [0.90, 0.10]
+    - [0.90, 0.90]
+    - [0.10, 0.90]
+text:
+  enabled: true
+  font: "Arial"
+  font_size: 32
+  max_chars: 90
+  position: [0.50, 0.50]
+  color: [255, 236, 210]
+  box_width: 0.86
+  mode: circular
+  circle_radius: 0.37
+  start_angle_deg: -90.0
+  letter_spacing: 1.05
+  ring_offset: 0.00
+  ring_band: 0.25
+  angle_offset_deg: 0.0
+  clockwise: true
+  alpha: 1.2
+  spin_speed: 0.03
+  height_scale: 2.4
+  glyph_scale: 3.3
+  repeat_text: false
+  outline_px: 2
+  outline_color: [10, 10, 10]
+  shadow_offset: [2, 2]
+  shadow_alpha: 160
+visuals:
+  center_radius: 0.25
+  ring_gap: 0.02
+  ring_thickness: 0.06
+  ember_count: 64
+  ember_speed: 0.35
+  pulse_speed: 2.4
+  pulse_strength: 0.9
+  always_pulse: true
+  celebration_flash_speed: 9.0
+  background_intensity: 0.18
+  baseline_fire: 0.7
+  ring_floor: 0.6
+  palette_fallback:
+    - [255, 120, 20]
+    - [255, 70, 10]
+    - [255, 180, 80]
+    - [120, 40, 10]
+  state_palettes:
+    IDLE:
+      - [0, 80, 140]
+      - [0, 120, 200]
+      - [10, 40, 80]
+      - [0, 160, 200]
+    FIRE:
+      - [255, 120, 20]
+      - [255, 70, 10]
+      - [255, 180, 80]
+      - [120, 40, 10]
+    PARTY:
+      - [255, 0, 140]
+      - [255, 80, 20]
+      - [40, 180, 255]
+      - [180, 60, 255]
+    PHONE:
+      - [200, 0, 0]
+      - [255, 40, 40]
+      - [120, 0, 0]
+      - [255, 200, 200]
