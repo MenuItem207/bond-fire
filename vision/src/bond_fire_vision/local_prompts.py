@@ -256,15 +256,15 @@ class LocalPromptGenerator:
             Pulse prompt string
         """
         if not color_names:
-            return "Pulse together."
+            return "Color combo: all of you."
 
         if len(color_names) == 1:
-            return f"{color_names[0]} pulse."
+            return f"Color combo: {color_names[0]}."
         elif len(color_names) == 2:
-            return f"{color_names[0]} + {color_names[1]} pulse."
+            return f"Color combo: {color_names[0]} + {color_names[1]}."
         else:
             # Multiple colors
-            return f"Rainbow pulse: {', '.join(color_names[:3])}."
+            return f"Color combo: {', '.join(color_names[:3])}."
 
     def clear_history(self) -> None:
         """Clear prompt history (useful for testing or reset)."""
