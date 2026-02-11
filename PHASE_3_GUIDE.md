@@ -10,7 +10,7 @@
 
 The ESP32 firmware (`bondfire_v2.ino`) transforms from a semi-intelligent driver into a **pure reactive slave** that:
 
-1. Receives v2.1 JSON packets over UDP
+1. Receives v2.1 JSON packets over UDP (now includes `wind`)
 2. Parses and validates the protocol
 3. Maps state/effects to hardware outputs
 4. Executes animations locally
@@ -103,7 +103,8 @@ enum DisplayState {
     STATE_IDLE,
     STATE_FIRE,
     STATE_PARTY,
-    STATE_PHONE
+    STATE_PHONE_IDLE,
+    STATE_FANNING
 };
 
 struct StateConfig {
@@ -126,12 +127,15 @@ void handlePacket(JsonDocument& doc) {
         currentStateConfig.state = STATE_FIRE;
     } else if (strcmp(stateStr, "PARTY") == 0) {
         currentStateConfig.state = STATE_PARTY;
-    } else if (strcmp(stateStr, "PHONE") == 0) {
-        currentStateConfig.state = STATE_PHONE;
+    } else if (strcmp(stateStr, "PHONE_IDLE") == 0) {
+        currentStateConfig.state = STATE_PHONE_IDLE;
+    } else if (strcmp(stateStr, "FANNING") == 0) {
+        currentStateConfig.state = STATE_FANNING;
     }
 
     currentStateConfig.mist_pwm = doc["mist_pwm"];
     currentStateConfig.fan_pwm = doc["fan_pwm"];
+    int wind = doc["wind"] | 0;  // 0-100, optional for hardware effects
     currentStateConfig.pulse_active = doc["pulse_active"];
     currentStateConfig.entry_flash_id = doc["entry_flash_id"] | -1;
 

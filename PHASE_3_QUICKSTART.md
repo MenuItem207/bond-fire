@@ -106,21 +106,35 @@ python manual_packet_sender.py --state PARTY --people 5 --repeat 5
 
 ---
 
-### Test PHONE State (Penalty)
+### Test PHONE_IDLE State (Phone Present)
 ```bash
-python manual_packet_sender.py --state PHONE --repeat 3
+python manual_packet_sender.py --state PHONE_IDLE --repeat 3
 ```
 
 **Expected ESP32 Response:**
 ```
-[UDP] State: PHONE | People: 0 | PWM: M=150 F=0 | Fire: 0.0%
+[UDP] State: PHONE_IDLE | People: 0 | PWM: M=150 F=60 | Wind: 0 | Fire: 0.0%
 ```
 
 **Expected LED Behavior:**
-- Ring: Red glitch/penalty effect with random pops
-- Matrix: Grey text "PHONE DETECTED"
-- Mist: Minimum (PWM 150 - safety floor)
-- Fan: Off (PWM 0)
+- Ring: Warm ember simmer
+- Matrix: Prompt text (after delay)
+- Mist/Fan: Low simmer (safety floor applies)
+
+### Test FANNING State (Wind Active)
+```bash
+python manual_packet_sender.py --state FANNING --wind 80 --repeat 3
+```
+
+**Expected ESP32 Response:**
+```
+[UDP] State: FANNING | People: 0 | PWM: M=180 F=150 | Wind: 80 | Fire: 80.0%
+```
+
+**Expected LED Behavior:**
+- Ring: Brighter ember + faster flicker
+- Matrix: Encouraging prompt text
+- Mist/Fan: Scales up with wind
 
 ---
 
@@ -148,7 +162,7 @@ bond-fire-vision --debug --enable-audio
   - 1 person → FIRE state starts, fire animation begins
   - 3+ people → Fire increases in intensity
   - 5 people for 2s → PARTY state, rainbow cycling starts
-  - Phone detected → Instant switch to PHONE, red glitch, mist cuts
+  - Phone detected → PHONE_IDLE/FANNING, ember glow, wind scales outputs
 
 ---
 

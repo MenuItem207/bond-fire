@@ -23,6 +23,7 @@ class PromptsConfig:
     normal_cooldown: float
     phone_cooldown: float
     same_state_cooldown: float
+    phone_idle_prompt_delay: float
 
 
 @dataclass
@@ -158,6 +159,7 @@ def _parse_config(data: dict) -> Config:
             normal_cooldown=data["prompts"]["normal_cooldown"],
             phone_cooldown=data["prompts"]["phone_cooldown"],
             same_state_cooldown=data["prompts"].get("same_state_cooldown", data["prompts"]["normal_cooldown"] * 1.5),
+            phone_idle_prompt_delay=data["prompts"].get("phone_idle_prompt_delay", 2.0),
         ),
         celebration=CelebrationConfig(
             duration_frames=data["celebration"]["duration_frames"],

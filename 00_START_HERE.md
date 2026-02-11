@@ -255,13 +255,14 @@ ESP32 (bondfire_v2.ino)
   └─ Mist Pump (PWM)
 ```
 
-### States (4)
+### States (5)
 
 ```
-IDLE     ← 0 people, blue breathing, low mist/fan
-FIRE     ← 1-4 people, fire animation, variable outputs
-PARTY    ← 5+ people, rainbow cycling, max outputs
-PHONE    ← Phone detected, red penalty, no outputs
+IDLE       ← 0 people, blue breathing, low mist/fan
+FIRE       ← 1-4 people, fire animation, variable outputs
+PARTY      ← 5+ people, rainbow cycling, max outputs
+PHONE_IDLE ← Phone detected, low simmer, prompt delay
+FANNING    ← Phone fanning detected, bright ember, boosted outputs
 ```
 
 ### Performance
@@ -323,7 +324,8 @@ Memory Usage:      ~3KB (520KB available) ✅
 - ✅ **Idle Effect** - Blue breathing glow
 - ✅ **Fire Effect** - Realistic fire with intensity scaling
 - ✅ **Party Effect** - Rainbow cycling
-- ✅ **Phone Glitch** - Red penalty effect
+- ✅ **Phone Idle** - Warm ember simmer
+- ✅ **Fanning Boost** - Bright ember + faster flicker
 - ✅ **Pulse Effect** - Color pulse overlay
 - ✅ **Entry Flash** - New person color highlight
 

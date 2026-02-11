@@ -107,6 +107,7 @@ class BondFireVision:
         self._celebration_duration = cfg.celebration.duration_frames / frame_rate
         self._celebration_until: Optional[float] = None
         self._same_state_cooldown = cfg.prompts.same_state_cooldown
+        self._phone_idle_prompt_delay = cfg.prompts.phone_idle_prompt_delay
         self._min_person_area_ratio = max(0.0, cfg.vision.min_person_area_ratio)
         self._frame_width = frame_width or cfg.vision.frame_width
         self._frame_height = frame_height or cfg.vision.frame_height
@@ -473,9 +474,17 @@ class BondFireVision:
             self._celebration_prompt = None
             self._celebration_until = None
         
+        phone_idle_delay_active = (
+            state_output.state == State.PHONE_IDLE
+            and self.state_machine.get_time_in_state(timestamp) < self._phone_idle_prompt_delay
+        )
+
         # Use celebration prompt if in celebration mode, otherwise normal logic
         if celebration_prompt is not None:
             prompt = celebration_prompt
+        # Delay phone-idle prompts until the phone has been present long enough
+        elif phone_idle_delay_active:
+            prompt = ""
         # Handle entry flash and prompts
         elif state_output.entry_flash_id:
             if (

@@ -13,6 +13,7 @@ prompts:
   normal_cooldown: 22         # Minimum time between prompts in non-phone states
   phone_cooldown: 22          # Minimum time between prompts while phone is detected
   same_state_cooldown: 22     # Minimum time between prompts when state is unchanged
+  phone_idle_prompt_delay: 2  # Seconds to wait before showing phone-idle prompts
   
 # Celebration Effect - Phone Exit Celebration
 celebration:

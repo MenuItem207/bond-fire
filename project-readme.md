@@ -8,7 +8,7 @@
 
 **The Empathic Hearth** is an interactive installation designed for SCAPE Singapore to combat "social islands" among youths. It uses Computer Vision and a responsive "mist flame" to gamify physical proximity and encourage deeper social connection.
 
-The installation acts as a **Social Battery Charger**—visualizing group size through animated fire that grows progressively stronger as more people join. The system requires a critical mass of **5 people** for 2 seconds to unlock a "Supernova" celebration. Smartphone detection triggers immediate penalties, encouraging mindful presence.
+The installation acts as a **Social Battery Charger**—visualizing group size through animated fire that grows progressively stronger as more people join. The system requires a critical mass of **5 people** for 2 seconds to unlock a "Supernova" celebration. Smartphones are treated as a tool: fanning with a phone boosts the fire instead of penalizing it.
 
 **Current Status:** Phase 2 Complete ✅ (Python vision system fully implemented) | Phase 3 Ready (ESP32 firmware)
 
@@ -60,21 +60,22 @@ The installation operates on a **0-100% social battery scale**. Every person add
                 │                            │
                 └─ (4- people for 3s) ──────┘
 
-        ANY STATE ──→ PHONE (phone detected)
-        Instant trigger, 0.5s exit hysteresis
-        Mist: CUTS, LEDs: Red Glitch (penalty effect)
-        "DISCONNECT TO CONNECT"
+        ANY STATE ──→ PHONE_IDLE (phone detected, no fanning)
+        Phone prompt delay: 2.0s before phone-idle prompt
+        Mist/Fan: Low simmer (scaled by wind)
+        └─ Fanning → FANNING (wind > threshold)
         └─ Phone removed for 0.5s → Previous State + Celebration
 ```
 
 ### State Details
 
-| State     | People | Battery | Mist | Fan  | LEDs           | Text Theme |
-| --------- | ------ | ------- | ---- | ---- | -------------- | ---------- |
-| **IDLE**  | 0      | 0%      | OFF  | Low  | Breathing Blue | Lure       |
-| **FIRE**  | 1-4    | 20-80%  | Ramp | Ramp | Orange → Red   | Nudge      |
-| **PARTY** | 5+     | 100%    | MAX  | MAX  | Rainbow        | Celebrate  |
-| **PHONE** | Any    | -       | 0%   | -    | Red Glitch     | Alert      |
+| State          | People | Battery | Mist | Fan  | LEDs           | Text Theme |
+| -------------- | ------ | ------- | ---- | ---- | -------------- | ---------- |
+| **IDLE**       | 0      | 0%      | OFF  | Low  | Breathing Blue | Lure       |
+| **FIRE**       | 1-4    | 20-80%  | Ramp | Ramp | Orange → Red   | Nudge      |
+| **PARTY**      | 5+     | 100%    | MAX  | MAX  | Rainbow        | Celebrate  |
+| **PHONE_IDLE** | Any    | -       | Low  | Low  | Warm ember     | Prompt     |
+| **FANNING**    | Any    | -       | Ramp | Ramp | Bright ember   | Encourage  |
 
 ---
 
@@ -97,6 +98,7 @@ The Mac broadcasts comprehensive JSON packets containing state, tracking data, v
   "prompt": "Battery 60%. We need 2 more!",
   "mist_pwm": 180,
   "fan_pwm": 100,
+  "wind": 35,
   "pulse_active": false,
   "entry_flash_id": 1,
   "audio_state": "AMBIENT",
@@ -154,7 +156,6 @@ Integrated audio feedback across detection, state changes, and narration.
 ### Audio Events
 
 ✅ **Entry Whoosh** - Person detected  
-✅ **Phone Buzzer** - Smartphone in frame  
 ✅ **Party Horn** - Phone removed (celebration)  
 ✅ **Pulse Chime** - Every 15s in FIRE state  
 ✅ **Buildup SFX** - Start + 33%/66% milestones  
@@ -177,6 +178,7 @@ state_machine:
 prompts:
   normal_cooldown: 10s       # Min time between prompts
   phone_cooldown: 10s        # While phone detected
+  phone_idle_prompt_delay: 2s # Delay before phone-idle prompt
 
 celebration:
   duration_frames: 10 frames # 2 seconds at 5fps
@@ -193,6 +195,9 @@ vision:
   confidence_threshold: 0.5
   person_class_id: 0         # COCO dataset
   phone_class_id: 67         # COCO dataset
+fanning:
+  power_threshold: 50.0
+  power_hysteresis: 5.0
 ```
 
 See [vision/CONFIG.md](vision/CONFIG.md) for detailed documentation.

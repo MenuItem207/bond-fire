@@ -63,13 +63,15 @@ enum DisplayState {
   STATE_IDLE,
   STATE_FIRE,
   STATE_PARTY,
-  STATE_PHONE
+  STATE_PHONE_IDLE,
+  STATE_FANNING
 };
 
 struct StateConfig {
   DisplayState state;
   uint8_t mist_pwm;
   uint8_t fan_pwm;
+  uint8_t wind;
   float fire_intensity;
   bool pulse_active;
   int entry_flash_id;
@@ -239,6 +241,7 @@ void setup() {
   currentStateConfig.state = STATE_IDLE;
   currentStateConfig.mist_pwm = MIST_IDLE;
   currentStateConfig.fan_pwm = 60;
+  currentStateConfig.wind = 0;
   currentStateConfig.fire_intensity = 0.0f;
   currentStateConfig.pulse_active = false;
   currentStateConfig.entry_flash_id = -1;
@@ -300,13 +303,16 @@ void handlePacket() {
     currentStateConfig.state = STATE_FIRE;
   } else if (strcmp(stateStr, "PARTY") == 0) {
     currentStateConfig.state = STATE_PARTY;
-  } else if (strcmp(stateStr, "PHONE") == 0) {
-    currentStateConfig.state = STATE_PHONE;
+  } else if (strcmp(stateStr, "PHONE_IDLE") == 0) {
+    currentStateConfig.state = STATE_PHONE_IDLE;
+  } else if (strcmp(stateStr, "FANNING") == 0) {
+    currentStateConfig.state = STATE_FANNING;
   }
 
   // --- Parse PWM Values ---
   currentStateConfig.mist_pwm = doc["mist_pwm"] | MIST_IDLE;
   currentStateConfig.fan_pwm = doc["fan_pwm"] | 60;
+  currentStateConfig.wind = doc["wind"] | 0;
 
   // --- Parse Auxiliary Flags ---
   currentStateConfig.pulse_active = doc["pulse_active"] | false;
@@ -381,9 +387,10 @@ void handlePacket() {
 
   // Debug output (optional)
   if (version == 2) {
-    Serial.printf("[UDP] State: %s | People: %d | PWM: M=%d F=%d | Fire: %.1f%%\n",
-                  stateStr, peopleCount, currentStateConfig.mist_pwm,
-                  currentStateConfig.fan_pwm, currentStateConfig.fire_intensity * 100.0f);
+    Serial.printf("[UDP] State: %s | People: %d | PWM: M=%d F=%d | Wind: %d | Fire: %.1f%%\n",
+            stateStr, peopleCount, currentStateConfig.mist_pwm,
+            currentStateConfig.fan_pwm, currentStateConfig.wind,
+            currentStateConfig.fire_intensity * 100.0f);
   }
 }
 
@@ -421,8 +428,11 @@ void applyStateEffects() {
       case STATE_PARTY:
         colorTransitionTo = CRGB(255, 50, 255);  // Bright magenta
         break;
-      case STATE_PHONE:
-        colorTransitionTo = CRGB(200, 200, 200); // Bright white
+      case STATE_PHONE_IDLE:
+        colorTransitionTo = CRGB(200, 120, 60); // Warm ember
+        break;
+      case STATE_FANNING:
+        colorTransitionTo = CRGB(255, 170, 80); // Brighter ember
         break;
     }
     
@@ -444,8 +454,11 @@ void applyStateEffects() {
         case STATE_PARTY:
           newStateText = "PARTY!";
           break;
-        case STATE_PHONE:
-          newStateText = "Phone detected";
+        case STATE_PHONE_IDLE:
+          newStateText = "Fan the flames";
+          break;
+        case STATE_FANNING:
+          newStateText = "Keep fanning";
           break;
       }
       if (newStateText != lastStateText) {
@@ -493,7 +506,7 @@ void applyStateEffects() {
 void renderStateEffects() {
   // Always render state-specific effects
   // Fire naturally flickers with intensity scaling, party has rainbow,
-  // idle has breathing glow, phone has red glitch
+  // idle has breathing glow, phone modes use ember fire
   switch (currentStateConfig.state) {
     case STATE_IDLE:
       renderIdleEffect();
@@ -511,8 +524,9 @@ void renderStateEffects() {
       renderPartyEffect();
       break;
 
-    case STATE_PHONE:
-      renderPhoneGlitch();
+    case STATE_PHONE_IDLE:
+    case STATE_FANNING:
+      renderFireEffect();
       break;
   }
 
@@ -600,21 +614,6 @@ void renderPartyEffect() {
   for (int i = 0; i < NUM_LEDS_RING; i++) {
     float hueFloat = (i / (float)NUM_LEDS_RING + rainbowPhase) * 255.0f;
     ringLeds[i] = CHSV((uint8_t)hueFloat, 255, 255);
-  }
-}
-
-/**
- * PHONE Glitch: Red penalty effect with random bright pops
- * Migrated from working.ino MODE_PENALTY
- */
-void renderPhoneGlitch() {
-  fill_solid(ringLeds, NUM_LEDS_RING, CRGB(80, 0, 0));
-
-  if (random8() < 150) {
-    ringLeds[random8(NUM_LEDS_RING)] = CRGB(255, 40, 40);
-  }
-  if (random8() < 45) {
-    ringLeds[random8(NUM_LEDS_RING)] = CRGB(255, 120, 120);
   }
 }
 
@@ -738,8 +737,11 @@ uint16_t getMatrixTextColor() {
       color = CHSV(hue, 255, 255);
       break;
     }
-    case STATE_PHONE:
-      color = CRGB(160, 0, 0);
+    case STATE_PHONE_IDLE:
+      color = CRGB(200, 120, 60);
+      break;
+    case STATE_FANNING:
+      color = CRGB(255, 170, 80);
       break;
   }
 

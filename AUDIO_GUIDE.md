@@ -120,19 +120,6 @@ build-up progress 66%→100%: (no pulse, transitions to PARTY state)
 
 ---
 
-### ⚠️ Alert Audio
-
-#### **buzzer_alert.wav**
-**Trigger:** ALERT state (phone detected)  
-**Volume:** 80% (0.8)  
-**Loop:** No (one-shot per state change)  
-**Purpose:** Warning/penalty indicator
-- Sharp alert that something is wrong
-- Indicates phone/device detected in space
-- Demands attention
-
----
-
 ## State Transitions & Audio Timeline
 
 ### Scenario: 0 → 1 Person Enters (Fire Crackle Responsive)
@@ -175,14 +162,14 @@ build-up progress 66%→100%: (no pulse, transitions to PARTY state)
 
 ---
 
-### Scenario: Phone Detected (ALERT State)
+### Scenario: Phone Detected (Digital Bellows)
 
 ```
 [FIRE or PARTY state with people]
   ↓ (phone detected in frame)
-[buzzer_alert @ 80%]
-[State changes to PHONE, music stops]
-[Red glitch effect on ring]
+[PHONE_IDLE or FANNING state]
+[Ambient audio continues]
+[Prompts encourage fanning after short delay]
 ```
 
 ---
@@ -190,7 +177,7 @@ build-up progress 66%→100%: (no pulse, transitions to PARTY state)
 ### Scenario: Phone Removed (Celebration)
 
 ```
-[PHONE state active]
+[PHONE_IDLE or FANNING state active]
   ↓ (phone exits)
 [Celebration triggered]
 [party_horn @ 80% plays]
@@ -259,7 +246,8 @@ When enabled, the system speaks text prompts:
 | **IDLE**                         | Silent (no users detected)                                  |
 | **FIRE** (1-3 people)            | Fire crackle (responsive to intensity) + chimes (every 15s) |
 | **PARTY** (4+ people)            | Party music 80% + party_horn 100% on entry                  |
-| **PHONE** (device detected)      | Buzzer 80% + alarm sound                                    |
+| **PHONE_IDLE** (phone present)   | Ambient continues + prompts                                 |
+| **FANNING** (wind active)        | Ambient continues, intensity rises                          |
 | **Build-Up** (approaching party) | buildup_start + buildup_pulse sequence                      |
 
 ---

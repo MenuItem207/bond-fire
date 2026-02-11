@@ -350,6 +350,8 @@ class BondFireProjection(mglw.WindowConfig):
     window_size = (1280, 720)
     aspect_ratio = None
     resizable = False
+    borderless = False
+    monitor = 0
 
     config_data: dict = {}
     args: argparse.Namespace
@@ -371,8 +373,6 @@ class BondFireProjection(mglw.WindowConfig):
         window_cfg = self.config_data.get("window", {})
         if window_cfg.get("vsync", True):
             self.wnd.vsync = True
-        if window_cfg.get("fullscreen", False) or self.args.fullscreen:
-            self.wnd.fullscreen = True
 
         self._load_visual_config()
         self._setup_geometry()
@@ -387,10 +387,10 @@ class BondFireProjection(mglw.WindowConfig):
         self._calibration = False
         self._selected_corner = 0
 
-    def close(self) -> None:
+    def on_close(self) -> None:
         if self._listener:
             self._listener.stop()
-        super().close()
+        super().on_close()
 
     def _load_visual_config(self) -> None:
         config = self.config_data
@@ -559,7 +559,6 @@ class BondFireProjection(mglw.WindowConfig):
                     float phone_prev = u_state_prev == 3 ? 1.0 : 0.0;
                     float phone_curr = u_state == 3 ? 1.0 : 0.0;
                     float phone_weight = mix(phone_prev, phone_curr, u_state_blend);
-                    float phone_glitch = noise(uv * 60.0 + u_time * 2.0) * 0.4 * phone_weight;
 
                     float celebration = smoothstep(0.0, 1.0, u_celebration) *
                                         (0.6 + 0.4 * sin(u_time * 12.0));
@@ -580,21 +579,17 @@ class BondFireProjection(mglw.WindowConfig):
                     flicker_mix = smoothstep(0.2, 0.95, flicker_mix);
 
                     float gain_prev = 1.0;
-                    if (u_state_prev == 0) {
-                        gain_prev = 0.45;
+                    if (u_state_prev == 3 || u_state_prev == 4) {
+                        gain_prev = 1.0;
                     } else if (u_state_prev == 2) {
                         gain_prev = 1.25;
-                    } else if (u_state_prev == 3) {
-                        gain_prev = 0.75;
                     }
 
                     float gain_curr = 1.0;
-                    if (u_state == 0) {
-                        gain_curr = 0.45;
+                    if (u_state == 3 || u_state == 4) {
+                        gain_curr = 1.0;
                     } else if (u_state == 2) {
                         gain_curr = 1.25;
-                    } else if (u_state == 3) {
-                        gain_curr = 0.75;
                     }
 
                     float state_gain = mix(gain_prev, gain_curr, u_state_blend);
@@ -634,13 +629,12 @@ class BondFireProjection(mglw.WindowConfig):
                     color += party_color * ring * 0.7 * party_weight;
                     color += party_color * ring_glow * 0.4 * party_weight;
 
-                    float phone_spark = step(0.92, noise(uv * 50.0 + u_time * 6.0));
-                    color += vec3(1.0, 0.3, 0.3) * phone_spark * 0.8 * phone_weight;
+                    float phone_spark = 0.0;
                     color += ember * (0.2 + 0.4 * swirl) * base;
                     color += ember * embers * 0.65;
                     color += u_palette[2] * pulse * 0.6;
                     color += u_palette[1] * party * 0.5;
-                    color += vec3(0.2, 0.4, 0.9) * phone_glitch;
+                    color += vec3(0.0);
 
                     vec3 texture_warm = mix(u_palette[0], u_palette[1], flicker_mix);
                     vec3 texture_hot = mix(u_palette[2], u_palette[3], flicker_mix);
@@ -766,7 +760,7 @@ class BondFireProjection(mglw.WindowConfig):
             return list(target)
         return [self._smooth_color(c, t, dt, tau) for c, t in zip(current, target)]
 
-    def render(self, time: float, frame_time: float) -> None:
+    def on_render(self, time: float, frame_time: float) -> None:
         if self.args.no_udp:
             self._advance_demo(frame_time)
 
@@ -921,7 +915,14 @@ class BondFireProjection(mglw.WindowConfig):
             self._state.prompt = "Projection demo mode"
 
     def _state_to_index(self, state: str) -> int:
-        mapping = {"IDLE": 0, "FIRE": 1, "PARTY": 2, "PHONE": 3}
+        mapping = {
+            "IDLE": 0,
+            "FIRE": 1,
+            "PARTY": 2,
+            "PHONE": 3,
+            "PHONE_IDLE": 3,
+            "FANNING": 3,
+        }
         return mapping.get(state.upper(), 0)
 
     def _resolve_palette(
@@ -964,7 +965,7 @@ class BondFireProjection(mglw.WindowConfig):
             return (r / 255.0, g / 255.0, b / 255.0)
         return (1.0, 0.5, 0.1)
 
-    def key_event(self, key, action, modifiers) -> None:
+    def on_key_event(self, key, action, modifiers) -> None:
         if action != self.wnd.keys.ACTION_PRESS:
             return
 
@@ -1120,6 +1121,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=4210, help="UDP port to listen on")
     parser.add_argument("--no-udp", action="store_true", help="Run in demo mode (no UDP)")
     parser.add_argument("--fullscreen", action="store_true", help="Start in fullscreen")
+    parser.add_argument("--monitor", type=int, default=0, help="Monitor index (0=primary, 1=secondary, etc.)")
     return parser
 
 
@@ -1131,11 +1133,53 @@ def main() -> None:
     window_cfg = config.get("window", {})
     width = int(window_cfg.get("width", 1280))
     height = int(window_cfg.get("height", 720))
+    
+    fullscreen = args.fullscreen or window_cfg.get("fullscreen", False)
+    
+    # Use pygame2 backend which supports multi-monitor better
+    import os
+    os.environ['MODERNGL_WINDOW'] = 'pygame2'
+    
+    # Set up display for multi-monitor
+    import pygame
+    pygame.init()
+    num_displays = pygame.display.get_num_displays()
+    print(f"Found {num_displays} display(s)")
+    
+    if args.monitor >= num_displays:
+        print(f"Warning: Monitor {args.monitor} not found, using monitor 0")
+        args.monitor = 0
+    
+    # Get desktop bounds for each display
+    desktop_sizes = pygame.display.get_desktop_sizes() if hasattr(pygame.display, 'get_desktop_sizes') else [(width, height)]
+    for i in range(num_displays):
+        bounds = desktop_sizes[i] if i < len(desktop_sizes) else (0, 0)
+        print(f"  Display {i}: {bounds}")
+    
+    # Position window on the selected display
+    if args.monitor < len(desktop_sizes):
+        # Calculate X position by summing widths of previous displays
+        x_offset = sum(desktop_sizes[i][0] for i in range(args.monitor))
+        y_offset = 0
+        os.environ['SDL_VIDEO_WINDOW_POS'] = f'{x_offset},{y_offset}'
+        print(f"Positioning window at ({x_offset}, {y_offset})")
+        
+        if fullscreen:
+            # Use borderless window at native resolution for better multi-monitor support
+            width = desktop_sizes[args.monitor][0]
+            height = desktop_sizes[args.monitor][1]
+            os.environ['SDL_BORDERLESS'] = '1'
+            print(f"Using borderless fullscreen: {width}x{height}")
+    
+    pygame.quit()
 
     BondFireProjection.window_size = (width, height)
+    BondFireProjection.monitor = args.monitor
+    BondFireProjection.borderless = fullscreen
+    BondFireProjection.fullscreen = False  # Use borderless instead of true fullscreen
     BondFireProjection.args = args
     BondFireProjection.config_data = config
-
+    
     mglw.run_window_config(BondFireProjection, args=mglw_args)
 
 
