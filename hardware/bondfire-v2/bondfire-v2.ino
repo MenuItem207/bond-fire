@@ -148,7 +148,7 @@ unsigned long candidateStateTime = 0;  // When candidate state appeared
 const unsigned long STATE_DEBOUNCE_MS = 50;  // 50ms debounce - fast LED response, still glitch-resistant
 bool colorTransitionActive = false;
 unsigned long colorTransitionStart = 0;
-const unsigned long COLOR_TRANSITION_DURATION = 200;  // 200ms smooth color transition
+const unsigned long COLOR_TRANSITION_DURATION = 600;  // 600ms smooth color transition (increased from 200ms)
 CRGB colorTransitionFrom = CRGB::Black;
 CRGB colorTransitionTo = CRGB::Black;
 
@@ -547,11 +547,20 @@ void renderStateEffects() {
  * Now scales with fire_intensity from packet
  * 
  * More people → More sparking and flicker (intensity 0.0-1.0)
+ * Wind (fanning) → Immediate boost to brightness and sparking
  */
 void renderFireEffect() {
   float intensity = currentStateConfig.fire_intensity;
   if (intensity < 0.0f) intensity = 0.0f;
   if (intensity > 1.0f) intensity = 1.0f;
+  
+  // Boost intensity with wind (0-100 scale) for immediate fanning feedback
+  float wind_boost = currentStateConfig.wind / 100.0f;
+  if (wind_boost > 0.05f) {
+    intensity = intensity * (1.0f + wind_boost * 0.7f);
+    if (intensity > 1.0f) intensity = 1.0f;
+  }
+  
   uint8_t brightness = (uint8_t)(70.0f + (185.0f * intensity));
 
   // Cool down fire
@@ -566,7 +575,8 @@ void renderFireEffect() {
   }
 
   // Spark generation (scaled by intensity - more people = more sparks and bigger fire)
-  uint8_t sparkingRatio = (uint8_t)(FIRE_SPARKING * currentStateConfig.fire_intensity);
+  // Wind also increases sparking for immediate visual feedback
+  uint8_t sparkingRatio = (uint8_t)(FIRE_SPARKING * intensity);
   if (random8() < sparkingRatio) {
     int sparkIndex = random8((NUM_LEDS_RING / 6) + 2);
     fireHeat[sparkIndex] = qadd8(fireHeat[sparkIndex], random8(160, 255));

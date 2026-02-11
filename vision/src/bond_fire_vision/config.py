@@ -55,12 +55,17 @@ class AudioConfig:
 class VisionConfig:
     """Vision detection configuration."""
     confidence_threshold: float
+    phone_confidence_threshold: float
     person_class_id: int
     phone_class_id: int
     min_person_area_ratio: float
     frame_width: int
     frame_height: int
     imgsz: int
+    iou_threshold: float
+    phone_debounce_frames_detect: int
+    phone_debounce_frames_lose: int
+    phone_persistence_frames: int
 
 
 @dataclass
@@ -178,12 +183,17 @@ def _parse_config(data: dict) -> Config:
         ),
         vision=VisionConfig(
             confidence_threshold=data["vision"]["confidence_threshold"],
+            phone_confidence_threshold=data["vision"].get("phone_confidence_threshold", data["vision"]["confidence_threshold"] * 0.5),
             person_class_id=data["vision"]["person_class_id"],
             phone_class_id=data["vision"]["phone_class_id"],
             min_person_area_ratio=data["vision"].get("min_person_area_ratio", 0.01),
             frame_width=data["vision"].get("frame_width", 1280),
             frame_height=data["vision"].get("frame_height", 720),
-            imgsz=data["vision"].get("imgsz", 960),
+            imgsz=data["vision"].get("imgsz", 1280),
+            iou_threshold=data["vision"].get("iou_threshold", 0.45),
+            phone_debounce_frames_detect=data["vision"].get("phone_debounce_frames_detect", 2),
+            phone_debounce_frames_lose=data["vision"].get("phone_debounce_frames_lose", 3),
+            phone_persistence_frames=data["vision"].get("phone_persistence_frames", 8),
         ),
         fanning=FanningConfig(
             history=data.get("fanning", {}).get("history", 30),

@@ -112,6 +112,9 @@ class BondFireVision:
         self._frame_width = frame_width or cfg.vision.frame_width
         self._frame_height = frame_height or cfg.vision.frame_height
         self._imgsz = imgsz or cfg.vision.imgsz
+        self._phone_confidence = cfg.vision.phone_confidence_threshold
+        self._iou_threshold = cfg.vision.iou_threshold
+        self._phone_persistence_frames = cfg.vision.phone_persistence_frames
         self._fanning_history = max(2, cfg.fanning.history)
         self._fanning_metric = cfg.fanning.metric
         self._fanning_threshold = cfg.fanning.movement_threshold
@@ -150,6 +153,11 @@ class BondFireVision:
         self._phone_missing_frames = 0
         self._phone_x_history: deque[float] = deque(maxlen=self._fanning_history)
         self._phone_detected = False
+        self._phone_debounce_detect = cfg.vision.phone_debounce_frames_detect
+        self._phone_debounce_lose = cfg.vision.phone_debounce_frames_lose
+        self._phone_raw_detected_count = 0
+        self._phone_raw_missing_count = 0
+        self._phone_persistence_counter = 0  # Frames since last raw phone detection
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -239,12 +247,15 @@ class BondFireVision:
         if annotate:
             self._draw_roi(frame, roi_pixels)
 
-        # Use track() instead of model() for persistent IDs
+        # Use track() with LOWEST confidence threshold to catch phones
+        # We'll manually filter people/phones with their respective thresholds after
+        min_conf = min(self.detection_confidence, self._phone_confidence)
         results = self.model.track(
             frame,
             persist=True,
             verbose=False,
-            conf=self.detection_confidence,
+            conf=min_conf,
+            iou=self._iou_threshold,
             imgsz=self._imgsz,
         )
         
@@ -259,10 +270,14 @@ class BondFireVision:
                 tid = int(track_id)
 
                 if cls == self.CLASS_PERSON:
-                    if conf < self.person_confidence:
+                    if conf < self.detection_confidence:
                         continue
                     box_area_ratio = ((x2 - x1) * (y2 - y1)) / max(1.0, (width * height))
                     if box_area_ratio < self._min_person_area_ratio:
+                        if annotate:
+                            # Show filtered-out small people in gray
+                            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (128, 128, 128), 1)
+                            cv2.putText(frame, f"TOO SMALL ({box_area_ratio:.3f})", (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 128, 128), 1)
                         continue
                     inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
                     if inside:
@@ -293,7 +308,7 @@ class BondFireVision:
                             cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                             
                 elif cls == self.CLASS_PHONE:
-                    if conf < self.detection_confidence:
+                    if conf < self._phone_confidence:
                         continue
                     inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
                     if inside:
@@ -304,7 +319,7 @@ class BondFireVision:
                         color = (0, 0, 255) if inside else (160, 160, 255)
                         thickness = 2 if inside else 1
                         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
-                        label = "PHONE" if inside else "PHONE (out)"
+                        label = f"PHONE ({conf:.2f})" if inside else "PHONE (out)"
                         cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         if best_phone is not None:
@@ -312,10 +327,16 @@ class BondFireVision:
             cx = (x1 + x2) * 0.5
             self._phone_x_history.append(cx)
             self._phone_missing_frames = 0
+            self._phone_persistence_counter = 0  # Reset persistence when phone is detected
         else:
             self._phone_missing_frames += 1
+            self._phone_persistence_counter += 1  # Increment frames since last detection
             if self._phone_missing_frames >= self._fanning_reset_missing:
                 self._phone_x_history.clear()
+        
+        # Apply persistence: if phone was recently seen, keep it detected for a few frames
+        if not phone_detected and self._phone_persistence_counter < self._phone_persistence_frames:
+            phone_detected = True  # Maintain detection through momentary occlusions
 
         movement = self._compute_fan_movement(self._phone_x_history)
         if phone_detected and movement > self._fanning_threshold:
@@ -323,12 +344,23 @@ class BondFireVision:
         else:
             self._fan_power *= self._fanning_decay
         self._fan_power = max(0.0, min(100.0, self._fan_power))
-        self._phone_detected = phone_detected
+        
+        # Debounce phone detection - require consecutive frames for state change
+        if phone_detected:
+            self._phone_raw_detected_count += 1
+            self._phone_raw_missing_count = 0
+            if self._phone_raw_detected_count >= self._phone_debounce_detect:
+                self._phone_detected = True
+        else:
+            self._phone_raw_missing_count += 1
+            self._phone_raw_detected_count = 0
+            if self._phone_raw_missing_count >= self._phone_debounce_lose:
+                self._phone_detected = False
 
-        # Update state machine
+        # Update state machine with DEBOUNCED phone detection value
         context = StateContext(
             people_count=person_count,
-            phone_detected=phone_detected,
+            phone_detected=self._phone_detected,
             fan_power=self._fan_power,
             timestamp=time.monotonic(),
         )
@@ -341,7 +373,8 @@ class BondFireVision:
         # Store people for packet building
         self._tracked_people = {p.id: p for p in people_in_roi}
 
-        state = VisionState(people_in_roi=person_count, phone_detected=phone_detected)
+        # Use debounced phone detection for all outputs
+        state = VisionState(people_in_roi=person_count, phone_detected=self._phone_detected)
 
         if annotate:
             self._draw_status(frame, state, state_output.state)
@@ -355,7 +388,26 @@ class BondFireVision:
 
     def _draw_status(self, frame, state: VisionState, current_state: State) -> None:
         """Draw status overlay on frame."""
-        status_text = f"{current_state.value}: {state.people_in_roi} people | Phone: {'YES' if state.phone_detected else 'NO'}"
+        # Show debounced status with counter info during transitions
+        if state.phone_detected:
+            # Already confirmed detected
+            if self._phone_raw_missing_count > 0:
+                # Losing detection, show countdown
+                phone_status = f"YES (losing {self._phone_raw_missing_count}/{self._phone_debounce_lose})"
+            elif self._phone_persistence_counter > 0:
+                # Persisting through occlusion
+                phone_status = f"YES (persist {self._phone_persistence_counter}/{self._phone_persistence_frames})"
+            else:
+                phone_status = "YES"
+        else:
+            # Currently not detected
+            if self._phone_raw_detected_count > 0:
+                # Building up detection, show count
+                phone_status = f"NO (detecting {self._phone_raw_detected_count}/{self._phone_debounce_detect})"
+            else:
+                phone_status = "NO"
+        
+        status_text = f"{current_state.value}: {state.people_in_roi} people | Phone: {phone_status}"
         color = (0, 0, 255) if state.phone_detected else (0, 255, 0)
         (text_w, _), _ = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
         cv2.rectangle(frame, (5, 5), (15 + text_w, 40), (0, 0, 0), -1)

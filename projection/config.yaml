@@ -48,6 +48,8 @@ visuals:
   baseline_fire: 0.7
   ring_floor: 0.6
   texture_strength: 40
+  state_transition_sec: 1.8
+  color_smooth_sec: 0.2
   palette_fallback:
     - [255, 120, 20]
     - [255, 70, 10]

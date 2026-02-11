@@ -350,8 +350,6 @@ class BondFireProjection(mglw.WindowConfig):
     window_size = (1280, 720)
     aspect_ratio = None
     resizable = False
-    borderless = False
-    monitor = 0
 
     config_data: dict = {}
     args: argparse.Namespace
@@ -373,6 +371,8 @@ class BondFireProjection(mglw.WindowConfig):
         window_cfg = self.config_data.get("window", {})
         if window_cfg.get("vsync", True):
             self.wnd.vsync = True
+        if window_cfg.get("fullscreen", False) or self.args.fullscreen:
+            self.wnd.fullscreen = True
 
         self._load_visual_config()
         self._setup_geometry()
@@ -387,10 +387,10 @@ class BondFireProjection(mglw.WindowConfig):
         self._calibration = False
         self._selected_corner = 0
 
-    def on_close(self) -> None:
+    def close(self) -> None:
         if self._listener:
             self._listener.stop()
-        super().on_close()
+        super().close()
 
     def _load_visual_config(self) -> None:
         config = self.config_data
@@ -776,7 +776,7 @@ class BondFireProjection(mglw.WindowConfig):
         )
         state_color_target = self._resolve_state_color(state_snapshot.state_name)
         dt = max(0.0, float(frame_time))
-        color_tau = float(self._visuals.get("color_smooth_sec", 0.8))
+        color_tau = float(self._visuals.get("color_smooth_sec", 0.2))
         self._smoothed_palette = self._smooth_palette(self._smoothed_palette, palette_target, dt, color_tau)
         self._smoothed_state_color = self._smooth_color(
             self._smoothed_state_color,
@@ -850,6 +850,12 @@ class BondFireProjection(mglw.WindowConfig):
                 render_fire = 1.0
             elif state_index == 3:
                 render_fire = 0.5
+        
+        # Boost fire with wind (fanning) - wind is 0-100, scale to 0.0-1.0 multiplier
+        wind_boost = float(state_snapshot.wind) / 100.0
+        if wind_boost > 0.05:  # Only boost when actively fanning
+            render_fire = render_fire * (1.0 + wind_boost * 0.8)
+        
         baseline_fire = float(self._visuals.get("baseline_fire", 0.35))
         if not math.isfinite(baseline_fire) or baseline_fire <= 0.0:
             baseline_fire = 0.35
@@ -965,7 +971,7 @@ class BondFireProjection(mglw.WindowConfig):
             return (r / 255.0, g / 255.0, b / 255.0)
         return (1.0, 0.5, 0.1)
 
-    def on_key_event(self, key, action, modifiers) -> None:
+    def key_event(self, key, action, modifiers) -> None:
         if action != self.wnd.keys.ACTION_PRESS:
             return
 
@@ -1121,7 +1127,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=4210, help="UDP port to listen on")
     parser.add_argument("--no-udp", action="store_true", help="Run in demo mode (no UDP)")
     parser.add_argument("--fullscreen", action="store_true", help="Start in fullscreen")
-    parser.add_argument("--monitor", type=int, default=0, help="Monitor index (0=primary, 1=secondary, etc.)")
     return parser
 
 
@@ -1133,53 +1138,11 @@ def main() -> None:
     window_cfg = config.get("window", {})
     width = int(window_cfg.get("width", 1280))
     height = int(window_cfg.get("height", 720))
-    
-    fullscreen = args.fullscreen or window_cfg.get("fullscreen", False)
-    
-    # Use pygame2 backend which supports multi-monitor better
-    import os
-    os.environ['MODERNGL_WINDOW'] = 'pygame2'
-    
-    # Set up display for multi-monitor
-    import pygame
-    pygame.init()
-    num_displays = pygame.display.get_num_displays()
-    print(f"Found {num_displays} display(s)")
-    
-    if args.monitor >= num_displays:
-        print(f"Warning: Monitor {args.monitor} not found, using monitor 0")
-        args.monitor = 0
-    
-    # Get desktop bounds for each display
-    desktop_sizes = pygame.display.get_desktop_sizes() if hasattr(pygame.display, 'get_desktop_sizes') else [(width, height)]
-    for i in range(num_displays):
-        bounds = desktop_sizes[i] if i < len(desktop_sizes) else (0, 0)
-        print(f"  Display {i}: {bounds}")
-    
-    # Position window on the selected display
-    if args.monitor < len(desktop_sizes):
-        # Calculate X position by summing widths of previous displays
-        x_offset = sum(desktop_sizes[i][0] for i in range(args.monitor))
-        y_offset = 0
-        os.environ['SDL_VIDEO_WINDOW_POS'] = f'{x_offset},{y_offset}'
-        print(f"Positioning window at ({x_offset}, {y_offset})")
-        
-        if fullscreen:
-            # Use borderless window at native resolution for better multi-monitor support
-            width = desktop_sizes[args.monitor][0]
-            height = desktop_sizes[args.monitor][1]
-            os.environ['SDL_BORDERLESS'] = '1'
-            print(f"Using borderless fullscreen: {width}x{height}")
-    
-    pygame.quit()
 
     BondFireProjection.window_size = (width, height)
-    BondFireProjection.monitor = args.monitor
-    BondFireProjection.borderless = fullscreen
-    BondFireProjection.fullscreen = False  # Use borderless instead of true fullscreen
     BondFireProjection.args = args
     BondFireProjection.config_data = config
-    
+
     mglw.run_window_config(BondFireProjection, args=mglw_args)
 
 

@@ -34,7 +34,7 @@ def _parse_roi(values: list[float]) -> Tuple[float, float, float, float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Bond Fire vision detector (v2.0).")
-    parser.add_argument("--model", default="yolov8m.pt", help="Path to a YOLOv8 weights file.")
+    parser.add_argument("--model", default="yolov8x.pt", help="Path to a YOLOv8 weights file (yolov8x.pt recommended for best phone detection).")
     parser.add_argument("--camera-index", type=int, default=0, help="Index of the camera to open.")
     parser.add_argument("--frame-width", type=int, default=None, help="Camera capture width.")
     parser.add_argument("--frame-height", type=int, default=None, help="Camera capture height.")
