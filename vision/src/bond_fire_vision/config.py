@@ -60,6 +60,19 @@ class VisionConfig:
 
 
 @dataclass
+class FanningConfig:
+    """Fanning detection configuration."""
+    history: int
+    metric: str
+    movement_threshold: float
+    decay: float
+    increase_step: float
+    reset_missing: int
+    power_threshold: float
+    power_hysteresis: float
+
+
+@dataclass
 class DebugConfig:
     """Debug configuration."""
     verbose_logging: bool
@@ -75,6 +88,7 @@ class Config:
     celebration: CelebrationConfig
     audio: AudioConfig
     vision: VisionConfig
+    fanning: FanningConfig
     debug: DebugConfig
 
 
@@ -162,6 +176,16 @@ def _parse_config(data: dict) -> Config:
             person_class_id=data["vision"]["person_class_id"],
             phone_class_id=data["vision"]["phone_class_id"],
             min_person_area_ratio=data["vision"].get("min_person_area_ratio", 0.01),
+        ),
+        fanning=FanningConfig(
+            history=data.get("fanning", {}).get("history", 30),
+            metric=data.get("fanning", {}).get("metric", "distance"),
+            movement_threshold=data.get("fanning", {}).get("movement_threshold", 40.0),
+            decay=data.get("fanning", {}).get("decay", 0.95),
+            increase_step=data.get("fanning", {}).get("increase_step", 6.0),
+            reset_missing=data.get("fanning", {}).get("reset_missing", 10),
+            power_threshold=data.get("fanning", {}).get("power_threshold", 50.0),
+            power_hysteresis=data.get("fanning", {}).get("power_hysteresis", 5.0),
         ),
         debug=DebugConfig(
             verbose_logging=data["debug"]["verbose_logging"],

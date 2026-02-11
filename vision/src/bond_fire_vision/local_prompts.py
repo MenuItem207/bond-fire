@@ -85,14 +85,15 @@ class LocalPromptGenerator:
         "Full house! Don't break the chain.",
     ]
 
-    PHONE_PROMPTS = [
-        "Eh, your phone cold. I am hot.",
-        "IG Story can wait. I cannot.",
-        "Doomscrolling won't keep you warm.",
-        "Look up. Real life is in 4K resolution.",
-        "Text the person next to you instead.",
-        "Aiyo, put the black mirror away.",
-        "Your boss isn't here. Relax lah.",
+    PHONE_IDLE_PROMPTS = [
+        "The fire is dying... Fan it with your phone!",
+        "(hint: works better with more phones)",
+        "I see a phone... try fanning the flames!",
+    ]
+
+    FANNING_PROMPTS = [
+        "WHOA! Keep it going!",
+        "Feeding the fire!",
     ]
 
     PHONE_EXIT_PROMPTS = [
@@ -160,8 +161,10 @@ class LocalPromptGenerator:
         """
         # Check cooldown timer
         now = time.monotonic()
-        # Use shorter cooldown for PHONE state (2 sec) vs normal (8 sec)
-        active_cooldown = self._phone_cooldown if state == State.PHONE else self._prompt_cooldown
+        # Use shorter cooldown for phone-driven states
+        active_cooldown = (
+            self._phone_cooldown if state in (State.PHONE_IDLE, State.FANNING) else self._prompt_cooldown
+        )
         if cooldown_override is not None:
             active_cooldown = max(active_cooldown, cooldown_override)
         if (self._current_prompt is not None and 
@@ -171,8 +174,10 @@ class LocalPromptGenerator:
         # Select prompt pool based on state
         if state == State.IDLE:
             pool = self.IDLE_PROMPTS
-        elif state == State.PHONE:
-            pool = self.PHONE_PROMPTS
+        elif state == State.PHONE_IDLE:
+            pool = self.PHONE_IDLE_PROMPTS
+        elif state == State.FANNING:
+            pool = self.FANNING_PROMPTS
         elif state == State.PARTY:
             pool = self.PARTY_PROMPTS
         elif state == State.FIRE:
@@ -226,7 +231,9 @@ class LocalPromptGenerator:
         if self._current_prompt is None:
             return False
         now = time.monotonic()
-        active_cooldown = self._phone_cooldown if state == State.PHONE else self._prompt_cooldown
+        active_cooldown = (
+            self._phone_cooldown if state in (State.PHONE_IDLE, State.FANNING) else self._prompt_cooldown
+        )
         if cooldown_override is not None:
             active_cooldown = max(active_cooldown, cooldown_override)
         return (now - self._last_prompt_time) < active_cooldown

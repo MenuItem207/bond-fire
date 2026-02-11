@@ -20,7 +20,8 @@ class State(Enum):
     IDLE = "IDLE"
     FIRE = "FIRE"
     PARTY = "PARTY"
-    PHONE = "PHONE"
+    PHONE_IDLE = "PHONE_IDLE"
+    FANNING = "FANNING"
 
 
 @dataclass
@@ -29,6 +30,7 @@ class StateContext:
 
     people_count: int
     phone_detected: bool
+    fan_power: float
     timestamp: float
 
 
@@ -53,9 +55,10 @@ class StateMachine:
     State Transitions:
     - IDLE → FIRE: First person detected
     - FIRE → PARTY: ≥5 people for ≥2 seconds
-    - FIRE → PHONE: Phone detected (preempts)
+    - FIRE → PHONE_IDLE: Phone detected without fanning
+    - FIRE → FANNING: Phone detected with fanning
     - PARTY → FIRE: <4 people for ≥3 seconds
-    - PHONE → previous: Phone absent for ≥2 seconds
+    - PHONE_IDLE/FANNING → previous: Phone absent for ≥2 seconds
     """
 
     # Timing constants - note: PHONE_ENTRY_DWELL and PHONE_EXIT_DWELL are loaded from config
@@ -90,6 +93,8 @@ class StateMachine:
         self.FIRE_ENTRY_DWELL = cfg.state_machine.fire_entry_dwell
         self.PHONE_ENTRY_DWELL = cfg.state_machine.phone_entry_dwell
         self.PHONE_EXIT_DWELL = cfg.state_machine.phone_exit_dwell
+        self.FAN_POWER_THRESHOLD = cfg.fanning.power_threshold
+        self.FAN_POWER_HYSTERESIS = cfg.fanning.power_hysteresis
 
         # Timers
         self._state_enter_time = time.monotonic()
@@ -102,6 +107,7 @@ class StateMachine:
         self._entry_flash_id: Optional[int] = None
         self._fire_entry_start: Optional[float] = None
         self._phone_entry_start: Optional[float] = None
+        self._phone_target_state: Optional[State] = None
 
         # Tracking
         self._last_people_count = 0
@@ -123,6 +129,7 @@ class StateMachine:
         now = context.timestamp
         people_count = context.people_count
         phone = context.phone_detected
+        fan_power = context.fan_power
 
         # Track new person entries for flash effect
         if active_ids is not None:
@@ -133,42 +140,55 @@ class StateMachine:
                 self._entry_flash_until = now + self.ENTRY_FLASH_DURATION
             self._known_ids = active_ids.copy()
 
-        # PHONE state has highest priority (preempts everything)
+        # Phone-driven states have highest priority (preempt everything)
         if phone:
-            if self.state != State.PHONE:
+            target_state = State.FANNING if fan_power >= self.FAN_POWER_THRESHOLD else State.PHONE_IDLE
+            if self.state not in (State.PHONE_IDLE, State.FANNING):
                 if self.PHONE_ENTRY_DWELL <= 0:
-                    print(f"📱 Phone detected! Entering PHONE state from {self.state.value}", flush=True)
+                    print(f"📱 Phone detected! Entering {target_state.value} from {self.state.value}", flush=True)
                     self.previous_state = self.state
-                    self._change_state(State.PHONE, now)
+                    self._change_state(target_state, now)
                     self._phone_just_exited = False
                     self._phone_entry_start = None
-                elif self._phone_entry_start is None:
+                    self._phone_target_state = None
+                elif self._phone_entry_start is None or self._phone_target_state != target_state:
                     self._phone_entry_start = now
+                    self._phone_target_state = target_state
                 elif now - self._phone_entry_start >= self.PHONE_ENTRY_DWELL:
-                    print(f"📱 Phone detected! Entering PHONE state from {self.state.value}", flush=True)
+                    print(f"📱 Phone detected! Entering {target_state.value} from {self.state.value}", flush=True)
                     self.previous_state = self.state
-                    self._change_state(State.PHONE, now)
+                    self._change_state(target_state, now)
                     self._phone_just_exited = False
                     self._phone_entry_start = None
+                    self._phone_target_state = None
             else:
+                if self.state == State.PHONE_IDLE and fan_power >= self.FAN_POWER_THRESHOLD:
+                    self._change_state(State.FANNING, now)
+                elif self.state == State.FANNING and fan_power <= (self.FAN_POWER_THRESHOLD - self.FAN_POWER_HYSTERESIS):
+                    self._change_state(State.PHONE_IDLE, now)
                 self._phone_entry_start = None
+                self._phone_target_state = None
             self._phone_exit_start = None
-        elif self.state == State.PHONE:
+        elif self.state in (State.PHONE_IDLE, State.FANNING):
             # Phone just disappeared, start exit timer
             if self._phone_exit_start is None:
                 print(f"📱 Phone removed, starting {self.PHONE_EXIT_DWELL}s exit timer...", flush=True)
                 self._phone_exit_start = now
             elif now - self._phone_exit_start >= self.PHONE_EXIT_DWELL:
-                # Exit PHONE, return to previous state
-                print(f"📱 Phone exit complete (after {self.PHONE_EXIT_DWELL}s), returning to {self.previous_state.value}", flush=True)
+                # Exit phone mode, return to previous state
+                print(
+                    f"📱 Phone exit complete (after {self.PHONE_EXIT_DWELL}s), returning to {self.previous_state.value}",
+                    flush=True,
+                )
                 self._change_state(self.previous_state, now)
                 self._phone_exit_start = None
-                self._phone_just_exited = True  # Flag celebration
+                self._phone_just_exited = True
         else:
             self._phone_entry_start = None
+            self._phone_target_state = None
 
         # Evaluate non-PHONE states
-        if self.state != State.PHONE:
+        if self.state not in (State.PHONE_IDLE, State.FANNING):
             # IDLE logic
             if people_count == 0:
                 if self._idle_start is None:
@@ -254,7 +274,13 @@ class StateMachine:
             elapsed = now - self._party_buildup_start
             party_buildup_progress = min(1.0, elapsed / self.PARTY_ENTRY_BUILDUP)
         
-        output = self._calculate_output(people_count, pulse_active, entry_flash_id, party_buildup_progress)
+        output = self._calculate_output(
+            people_count,
+            pulse_active,
+            entry_flash_id,
+            party_buildup_progress,
+            fan_power,
+        )
 
         # Reset phone exit flag after one frame
         if self._phone_just_exited:
@@ -275,6 +301,7 @@ class StateMachine:
         self._fire_entry_start = None
         self._phone_entry_start = None
         self._phone_exit_start = None
+        self._phone_target_state = None
 
         # Reset pulse timer on state entry
         if new_state == State.FIRE:
@@ -288,6 +315,7 @@ class StateMachine:
         pulse_active: bool,
         entry_flash_id: Optional[int],
         party_buildup_progress: float = 0.0,
+        fan_power: float = 0.0,
     ) -> StateOutput:
         """Calculate hardware outputs for current state."""
         if self.state == State.IDLE:
@@ -344,12 +372,15 @@ class StateMachine:
                 phone_just_exited=False,
             )
 
-        elif self.state == State.PHONE:
+        elif self.state in (State.PHONE_IDLE, State.FANNING):
+            normalized_power = max(0.0, min(1.0, fan_power / 100.0))
+            fan_pwm = int(self.FAN_IDLE + normalized_power * (self.FAN_MAX - self.FAN_IDLE))
+            mist_pwm = int(self.MIST_MIN + normalized_power * (self.MIST_MAX - self.MIST_MIN))
             return StateOutput(
-                state=State.PHONE,
-                mist_pwm=self.MIST_MIN,
-                fan_pwm=0,
-                fire_intensity=0.0,
+                state=self.state,
+                mist_pwm=mist_pwm,
+                fan_pwm=fan_pwm,
+                fire_intensity=normalized_power,
                 pulse_active=False,
                 entry_flash_id=None,
                 party_buildup_progress=0.0,
