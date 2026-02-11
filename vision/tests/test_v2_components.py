@@ -18,14 +18,10 @@ from bond_fire_vision.state_machine import State, StateContext, StateMachine
 
 def make_context(
     people_count: int,
-    phone_detected: bool,
     timestamp: float,
-    fan_power: float = 0.0,
 ) -> StateContext:
     return StateContext(
         people_count=people_count,
-        phone_detected=phone_detected,
-        fan_power=fan_power,
         timestamp=timestamp,
     )
 
@@ -90,12 +86,11 @@ class TestStateMachine:
         sm = StateMachine()
         now = time.time()
 
-        context = make_context(people_count=1, phone_detected=False, timestamp=now)
+        context = make_context(people_count=1, timestamp=now)
         sm.update(context)
 
         context = make_context(
             people_count=1,
-            phone_detected=False,
             timestamp=now + sm.FIRE_ENTRY_DWELL + 0.01,
         )
         output = sm.update(context)
@@ -109,77 +104,38 @@ class TestStateMachine:
         now = time.time()
 
         # Bring to FIRE state
-        context = make_context(people_count=1, phone_detected=False, timestamp=now)
+        context = make_context(people_count=1, timestamp=now)
         sm.update(context)
         context = make_context(
             people_count=1,
-            phone_detected=False,
             timestamp=now + sm.FIRE_ENTRY_DWELL + 0.01,
         )
         sm.update(context)
 
         # Jump to 5 people but stay below dwell time
-        context = make_context(people_count=5, phone_detected=False, timestamp=now + 1.0)
+        context = make_context(people_count=5, timestamp=now + 1.0)
         output = sm.update(context)
         assert output.state == State.FIRE  # Not yet, below dwell
 
         # At dwell time (2s) but before buildup completes (needs 1.5s more)
-        context = make_context(people_count=5, phone_detected=False, timestamp=now + 3.0)
+        context = make_context(people_count=5, timestamp=now + 3.0)
         output = sm.update(context)
         assert output.state == State.FIRE  # Still FIRE, in buildup phase
 
         # Exceed dwell + buildup time (2 + 1.5 = 3.5 seconds)
-        context = make_context(people_count=5, phone_detected=False, timestamp=now + 4.5)
+        context = make_context(people_count=5, timestamp=now + 4.5)
         output = sm.update(context)
         assert output.state == State.PARTY
-
-    def test_phone_preempts_fire(self):
-        """Test phone-driven states preempt FIRE."""
-        sm = StateMachine()
-        now = time.time()
-
-        # Start in FIRE
-        context = make_context(people_count=3, phone_detected=False, timestamp=now)
-        sm.update(context)
-        context = make_context(
-            people_count=3,
-            phone_detected=False,
-            timestamp=now + sm.FIRE_ENTRY_DWELL + 0.01,
-        )
-        sm.update(context)
-        assert sm.state == State.FIRE
-
-        # Phone appears
-        context = make_context(
-            people_count=3,
-            phone_detected=True,
-            fan_power=10.0,
-            timestamp=now + sm.PHONE_ENTRY_DWELL + 0.01,
-        )
-        output = sm.update(context)
-        assert output.state == State.PHONE_IDLE
-        assert sm.state == State.PHONE_IDLE
-
-        context = make_context(
-            people_count=3,
-            phone_detected=True,
-            fan_power=80.0,
-            timestamp=now + sm.PHONE_ENTRY_DWELL + 0.1,
-        )
-        output = sm.update(context)
-        assert output.state == State.FANNING
-        assert sm.state == State.FANNING
 
     def test_fire_intensity_scaling(self):
         """Test fire intensity scales with people count."""
         sm = StateMachine()
         now = time.time()
 
-        context1 = make_context(people_count=1, phone_detected=False, timestamp=now)
+        context1 = make_context(people_count=1, timestamp=now)
         sm.update(context1)
         context1 = make_context(
             people_count=1,
-            phone_detected=False,
             timestamp=now + sm.FIRE_ENTRY_DWELL + 0.01,
         )
         output1 = sm.update(context1)
@@ -187,7 +143,6 @@ class TestStateMachine:
 
         context4 = make_context(
             people_count=4,
-            phone_detected=False,
             timestamp=now + sm.FIRE_ENTRY_DWELL + 0.1,
         )
         output4 = sm.update(context4)
@@ -202,23 +157,22 @@ class TestStateMachine:
         sm = StateMachine(pulse_interval=1.0)  # 1 second for testing
         now = time.time()
 
-        context = make_context(people_count=2, phone_detected=False, timestamp=now)
+        context = make_context(people_count=2, timestamp=now)
         sm.update(context)
         context = make_context(
             people_count=2,
-            phone_detected=False,
             timestamp=now + sm.FIRE_ENTRY_DWELL + 0.01,
         )
         output = sm.update(context)
         assert output.pulse_active is False
 
         # Still not time
-        context = make_context(people_count=2, phone_detected=False, timestamp=now + 0.5)
+        context = make_context(people_count=2, timestamp=now + 0.5)
         output = sm.update(context)
         assert output.pulse_active is False
 
         # Time for pulse
-        context = make_context(people_count=2, phone_detected=False, timestamp=now + 1.1)
+        context = make_context(people_count=2, timestamp=now + 1.1)
         output = sm.update(context)
         assert output.pulse_active is True
 
@@ -243,14 +197,6 @@ class TestLocalPrompts:
         # Should be different prompts (from different pools)
         assert p1 != p2
         assert p2 != p4
-
-    def test_phone_prompts(self):
-        """Test PHONE_IDLE prompts are available."""
-        gen = LocalPromptGenerator()
-        prompt = gen.generate(State.PHONE_IDLE, 2, colors_contrasting=False)
-        assert len(prompt) > 0
-        # Phone prompts should be present and distinct from other states
-        assert len(prompt) <= 120
 
     def test_entry_prompt(self):
         """Test entry prompt generation."""
@@ -289,7 +235,6 @@ class TestPacketBuilder:
         packet = pb.build(
             state=State.FIRE,
             people=people,
-            phone_detected=False,
             dominant_palette=[255, 0, 0],
             prompt="Test prompt",
             mist_pwm=200,
@@ -304,7 +249,6 @@ class TestPacketBuilder:
         assert "fps" in packet
         assert packet["state"] == "FIRE"
         assert len(packet["people"]) == 1
-        assert packet["phone_detected"] is False
         assert packet["prompt"] == "Test prompt"
         assert packet["mist_pwm"] == 200
         assert packet["fan_pwm"] == 150
@@ -316,7 +260,6 @@ class TestPacketBuilder:
         packet = pb.build(
             state=State.FIRE,
             people=[],
-            phone_detected=False,
             dominant_palette=[],
             prompt="Test",
             mist_pwm=300,
@@ -334,7 +277,6 @@ class TestPacketBuilder:
         packet = pb.build(
             state=State.FIRE,
             people=[],
-            phone_detected=False,
             dominant_palette=[],
             prompt=long_prompt,
             mist_pwm=200,
@@ -354,7 +296,6 @@ class TestPacketBuilder:
         packet = pb.build(
             state=State.FIRE,
             people=people,
-            phone_detected=False,
             dominant_palette=[],
             prompt="Test",
             mist_pwm=200,
@@ -372,7 +313,6 @@ class TestPacketBuilder:
             packet = pb.build(
                 state=State.FIRE,
                 people=[],
-                phone_detected=False,
                 dominant_palette=[],
                 prompt="Test",
                 mist_pwm=200,

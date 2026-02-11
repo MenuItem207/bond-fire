@@ -464,7 +464,6 @@ class BondFireProjection(mglw.WindowConfig):
                 uniform float u_pulse_strength;
                 uniform float u_force_pulse;
                 uniform float u_party;
-                uniform float u_celebration;
                 uniform vec3 u_palette[4];
                 uniform vec3 u_state_color;
                 uniform float u_ring_floor;
@@ -556,8 +555,6 @@ class BondFireProjection(mglw.WindowConfig):
                     float party = smoothstep(0.0, 1.0, u_party) *
                                   (0.5 + 0.5 * cos((delta.x * 12.0 + delta.y * 12.0) + u_time * 4.0));
 
-                    float celebration = smoothstep(0.0, 1.0, u_celebration) *
-                                        (0.6 + 0.4 * sin(u_time * 12.0));
 
                     vec2 warp = vec2(
                         noise(uv * 6.0 + vec2(u_time * 0.15, 0.0)),
@@ -648,7 +645,6 @@ class BondFireProjection(mglw.WindowConfig):
                     float inner_tint = smoothstep(u_base_radius + 0.02, u_base_radius - 0.04, dist);
                     color = mix(color, flood_tint * 0.9, inner_tint * fill_boost);
 
-                    color += celebration * vec3(1.0, 0.8, 0.6);
 
                     color = mix(color, vec3(0.0), center_mask * (1.0 - fill_boost));
 
@@ -842,10 +838,11 @@ class BondFireProjection(mglw.WindowConfig):
             elif state_index == 3:
                 render_fire = 0.5
         
-        # Boost fire with wind (fanning) - wind is 0-100, scale to 0.0-1.0 multiplier
+        # Boost fire with wind - wind is 0-100, scale to 0.0-1.0 multiplier
         wind_boost = float(state_snapshot.wind) / 100.0
-        if wind_boost > 0.05:  # Only boost when actively fanning
-            render_fire = render_fire * (1.0 + wind_boost * 0.8)
+        wind_boost = clamp(wind_boost, 0.0, 1.0)
+        if wind_boost > 0.05:  # Only boost when wind is active
+            render_fire = render_fire * (1.0 + wind_boost * 1.1)
 
         # Step fire size/brightness by state (IDLE=0, FIRE=1, PARTY=2)
         render_fire = render_fire * (1.0 + 0.2 * state_index)
@@ -858,11 +855,13 @@ class BondFireProjection(mglw.WindowConfig):
         self._set_uniform(prog, "u_fire", render_fire)
         self._set_uniform(prog, "u_pulse", 1.0 if state_snapshot.pulse_active else 0.0)
         self._set_uniform(prog, "u_pulse_speed", float(self._visuals.get("pulse_speed", 2.4)))
-        self._set_uniform(prog, "u_pulse_strength", float(self._visuals.get("pulse_strength", 0.8)))
+        pulse_strength = float(self._visuals.get("pulse_strength", 0.8)) * (1.0 + wind_boost * 0.6)
+        self._set_uniform(prog, "u_pulse_strength", pulse_strength)
         self._set_uniform(prog, "u_force_pulse", 1.0 if self._visuals.get("always_pulse", True) else 0.0)
         self._set_uniform(prog, "u_party", float(state_snapshot.party_buildup_progress))
-        self._set_uniform(prog, "u_celebration", 1.0 if state_snapshot.celebration else 0.0)
-        self._set_uniform(prog, "u_ring_floor", float(self._visuals.get("ring_floor", 0.35)))
+        ring_floor = float(self._visuals.get("ring_floor", 0.35))
+        ring_floor = clamp(ring_floor + wind_boost * float(self._visuals.get("wind_ring_boost", 0.35)), 0.0, 1.5)
+        self._set_uniform(prog, "u_ring_floor", ring_floor)
         text_mode = 1 if str(text_cfg.get("mode", "linear")) == "circular" else 0
         ring_offset = float(text_cfg.get("ring_offset", 0.06))
         ring_band = float(text_cfg.get("ring_band", 0.05))
@@ -911,7 +910,7 @@ class BondFireProjection(mglw.WindowConfig):
             self._state.fire_intensity = 0.6 + 0.4 * math.sin(self._demo_time * 0.5)
             self._state.pulse_active = math.sin(self._demo_time * 0.2) > 0.7
             self._state.party_buildup_progress = 0.5 + 0.5 * math.sin(self._demo_time * 0.3)
-            self._state.celebration = math.sin(self._demo_time * 0.8) > 0.9
+            self._state.wind = int((math.sin(self._demo_time * 0.6) * 0.5 + 0.5) * 100)
             self._state.prompt = "Projection demo mode"
 
     def _state_to_index(self, state: str) -> int:

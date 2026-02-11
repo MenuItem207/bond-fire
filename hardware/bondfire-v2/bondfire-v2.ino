@@ -134,8 +134,6 @@ unsigned long entryFlashUntil = 0;
 CRGB entryFlashColor;
 float rainbowPhase = 0.0f;
 float pulsePhase = 0.0f;
-unsigned long celebrationUntil = 0;
-const unsigned long CELEBRATION_MS = 1500;
 
 // State Change Transition Effect
 DisplayState lastStateRendered = STATE_IDLE;
@@ -355,12 +353,6 @@ void handlePacket() {
     }
   }
 
-  // --- Parse Celebration Flag ---
-  bool celebration = doc["celebration"] | false;
-  if (celebration) {
-    celebrationUntil = millis() + CELEBRATION_MS;
-  }
-
   // --- Handle Entry Flash ---
   if (currentStateConfig.entry_flash_id != -1) {
     // Look up person color from people array
@@ -507,10 +499,7 @@ void renderStateEffects() {
       break;
   }
 
-  // Celebration overlay has highest priority (deprecated, kept for compatibility)
-  if (millis() < celebrationUntil) {
-    renderCelebrationEffect();
-  } else if (millis() < entryFlashUntil) {
+  if (millis() < entryFlashUntil) {
     renderEntryFlash();
   }
 }
@@ -524,14 +513,14 @@ void renderStateEffects() {
  * Now scales with fire_intensity from packet
  * 
  * More people → More sparking and flicker (intensity 0.0-1.0)
- * Wind (fanning) → Immediate boost to brightness and sparking
+ * Wind → Immediate boost to brightness and sparking
  */
 void renderFireEffect() {
   float intensity = currentStateConfig.fire_intensity;
   if (intensity < 0.0f) intensity = 0.0f;
   if (intensity > 1.0f) intensity = 1.0f;
   
-  // Boost intensity with wind (0-100 scale) for immediate fanning feedback
+  // Boost intensity with wind (0-100 scale) for immediate feedback
   float wind_boost = currentStateConfig.wind / 100.0f;
   if (wind_boost > 0.05f) {
     intensity = intensity * (1.0f + wind_boost * 0.7f);
@@ -643,20 +632,6 @@ void renderEntryFlash() {
     );
   }
 }
-
-/**
- * CELEBRATION: Short rainbow burst overlay
- * Triggered when celebration flag is received
- */
-void renderCelebrationEffect() {
-  uint8_t beat = beatsin8(12, 80, 255);
-  uint8_t baseHue = (millis() / 10) % 255;
-
-  for (int i = 0; i < NUM_LEDS_RING; i++) {
-    ringLeds[i] = CHSV(baseHue + (i * 6), 255, beat);
-  }
-}
-
 
 // ===== SECTION 8: MATRIX DISPLAY =====
 

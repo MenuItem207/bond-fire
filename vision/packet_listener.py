@@ -24,7 +24,6 @@ def format_state(state: str) -> str:
         "IDLE": 36,   # Cyan
         "FIRE": 31,   # Red
         "PARTY": 35,  # Magenta
-        "PHONE": 33,  # Yellow
     }
     return colorize(state, colors.get(state, 37))
 
@@ -47,10 +46,9 @@ def display_packet(packet: Dict[str, Any], show_raw: bool = False) -> None:
     # State and counts
     state = packet.get("state", "UNKNOWN")
     people_count = len(packet.get("people", []))
-    phone = packet.get("phone_detected", False)
     fps = packet.get("fps", 0)
     
-    print(f"State: {format_state(state)} | People: {people_count} | Phone: {'🚨 YES' if phone else 'NO'} | FPS: {fps:.1f}")
+    print(f"State: {format_state(state)} | People: {people_count} | FPS: {fps:.1f}")
     
     # People tracking
     if people_count > 0:
@@ -81,7 +79,8 @@ def display_packet(packet: Dict[str, Any], show_raw: bool = False) -> None:
     # Hardware outputs
     mist = packet.get("mist_pwm", 0)
     fan = packet.get("fan_pwm", 0)
-    print(f"\nHardware: Mist={mist} | Fan={fan}")
+    wind = packet.get("wind", 0)
+    print(f"\nHardware: Mist={mist} | Fan={fan} | Wind={wind}")
     
     # Effects
     pulse = packet.get("pulse_active", False)
@@ -130,12 +129,12 @@ def listen(port: int, show_raw: bool = False, compact: bool = False) -> None:
                     # Compact one-line display
                     state = packet.get("state", "?")
                     people = len(packet.get("people", []))
-                    phone = "📱" if packet.get("phone_detected") else "  "
+                    wind = packet.get("wind", 0)
                     fps = packet.get("fps", 0)
                     prompt = packet.get("prompt", "")[:40]
                     timestamp = datetime.now().strftime("%H:%M:%S")
-                    
-                    print(f"[{timestamp}] {format_state(state):8} | {people}p {phone} | {fps:4.1f}fps | {prompt}")
+
+                    print(f"[{timestamp}] {format_state(state):8} | {people}p | wind={wind:3d} | {fps:4.1f}fps | {prompt}")
                 else:
                     display_packet(packet, show_raw)
                     

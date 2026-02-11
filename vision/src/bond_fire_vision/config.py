@@ -23,12 +23,6 @@ class PromptsConfig:
 
 
 @dataclass
-class CelebrationConfig:
-    """Celebration effect configuration."""
-    duration_frames: int
-
-
-@dataclass
 class TTSConfig:
     """Text-to-speech configuration."""
     enabled: bool
@@ -92,7 +86,6 @@ class Config:
     """Complete application configuration."""
     state_machine: StateConfig
     prompts: PromptsConfig
-    celebration: CelebrationConfig
     audio: AudioConfig
     vision: VisionConfig
     firebase: FirebaseConfig
@@ -160,9 +153,6 @@ def _parse_config(data: dict) -> Config:
         prompts=PromptsConfig(
             normal_cooldown=data["prompts"]["normal_cooldown"],
             same_state_cooldown=data["prompts"].get("same_state_cooldown", data["prompts"]["normal_cooldown"] * 1.5),
-        ),
-        celebration=CelebrationConfig(
-            duration_frames=data["celebration"]["duration_frames"],
         ),
         audio=AudioConfig(
             master_volume=data["audio"]["master_volume"],

@@ -9,9 +9,7 @@ src/bond_fire_vision/detector.py
 src/bond_fire_vision/firebase_shake.py
 src/bond_fire_vision/local_prompts.py
 src/bond_fire_vision/packet_builder.py
-src/bond_fire_vision/prompting.py
 src/bond_fire_vision/state_machine.py
-src/bond_fire_vision/state_machine_old.py
 src/bond_fire_vision.egg-info/PKG-INFO
 src/bond_fire_vision.egg-info/SOURCES.txt
 src/bond_fire_vision.egg-info/dependency_links.txt

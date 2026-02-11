@@ -13,7 +13,6 @@ class VisualState:
     fire_intensity: float = 0.0
     pulse_active: bool = False
     party_buildup_progress: float = 0.0
-    celebration: bool = False
     wind: int = 0
 
     def update_from_packet(self, packet: dict) -> None:
@@ -26,5 +25,4 @@ class VisualState:
         self.party_buildup_progress = float(
             packet.get("party_buildup_progress", self.party_buildup_progress)
         )
-        self.celebration = bool(packet.get("celebration", self.celebration))
         self.wind = int(packet.get("wind", self.wind))

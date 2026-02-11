@@ -3,17 +3,6 @@
 Assembles JSON packets with full schema including tracking data, colors,
 state machine outputs, and audio context.
 
-CELEBRATION VISUAL EFFECT SPECIFICATION:
-When celebration=True in the packet (phone exit event):
-- Arduino should trigger a special celebration light show
-- Recommended effect: Rapid rainbow pulse or bright flash sequence
-- Duration: ~1 second (matches celebration prompt display time)
-- The 'celebration' flag is set for 5 frames (~1 sec @ 5fps)
-- Hardware can use this to:
-  1. Flash LEDs in celebration pattern (rainbow, sparkle, strobe)
-  2. Briefly boost flame brightness (mist + fan PWM spike)
-  3. Play coordinated light + audio effect
-- After celebration ends, return to normal state-based lighting
 """
 
 from __future__ import annotations
@@ -66,7 +55,6 @@ class PacketBuilderV2:
         entry_flash_id: Optional[int] = None,
         audio_state: AudioState = AudioState.SILENT,
         party_buildup_progress: float = 0.0,
-        celebration: bool = False,
     ) -> Dict[str, Any]:
         """
         Build a complete v2.1 packet.
@@ -84,7 +72,6 @@ class PacketBuilderV2:
             entry_flash_id: Track ID for entry flash (or None)
             audio_state: Current audio state
             party_buildup_progress: Party build-up progress (0.0-1.0)
-            celebration: True when phone exit celebration triggered
 
         Returns:
             JSON-serializable dictionary
@@ -130,6 +117,8 @@ class PacketBuilderV2:
         mist_pwm = max(0, min(255, mist_pwm))
         fan_pwm = max(0, min(255, fan_pwm))
         wind = max(0, min(100, int(wind)))
+        wind = int(round(wind / 25.0)) * 25
+        wind = max(0, min(100, wind))
         fire_intensity = max(0.0, min(1.0, fire_intensity))
 
         packet = {
@@ -148,7 +137,6 @@ class PacketBuilderV2:
             "entry_flash_id": entry_flash_id,
             "audio_state": audio_state.value,
             "party_buildup_progress": round(party_buildup_progress, 2),
-            "celebration": celebration,
         }
 
         return packet

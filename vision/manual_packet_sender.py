@@ -11,17 +11,16 @@ from types import SimpleNamespace
 from typing import Any, Dict
 
 # v2.1 State names
-STATE_NAMES = ["IDLE", "FIRE", "PARTY", "PHONE"]
+STATE_NAMES = ["IDLE", "FIRE", "PARTY"]
 
-# Preset configurations: (state, people_count, phone_detected, prompt)
-PRESETS: Dict[str, tuple[str, int, bool, str]] = {
-    "idle": ("IDLE", 0, False, "Waiting for guests..."),
-    "spark": ("FIRE", 1, False, "One is a start. Battery: 25%"),
-    "kindle": ("FIRE", 2, False, "Ask them about a hidden talent."),
-    "flame": ("FIRE", 3, False, "We're getting warmer. Battery: 75%"),
-    "blaze": ("FIRE", 4, False, "So close! One more human!"),
-    "supernova": ("PARTY", 5, False, "CRITICAL MASS ACHIEVED!"),
-    "phone": ("PHONE", 0, True, "SIGNAL INTERFERENCE. DISCONNECT TO CONNECT."),
+# Preset configurations: (state, people_count, prompt)
+PRESETS: Dict[str, tuple[str, int, str]] = {
+    "idle": ("IDLE", 0, "Waiting for guests..."),
+    "spark": ("FIRE", 1, "One is a start. Battery: 25%"),
+    "kindle": ("FIRE", 2, "Ask them about a hidden talent."),
+    "flame": ("FIRE", 3, "We're getting warmer. Battery: 75%"),
+    "blaze": ("FIRE", 4, "So close! One more human!"),
+    "supernova": ("PARTY", 5, "CRITICAL MASS ACHIEVED!"),
 }
 
 
@@ -31,17 +30,15 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("preset", nargs="?", choices=sorted(PRESETS.keys()), help="Preset configuration to send.")
-    parser.add_argument("--state", choices=STATE_NAMES, help="Override state (IDLE/FIRE/PARTY/PHONE).")
+    parser.add_argument("--state", choices=STATE_NAMES, help="Override state (IDLE/FIRE/PARTY).")
     parser.add_argument("--people", type=int, help="Number of people detected (0-6).")
-    parser.add_argument("--phone", action="store_true", help="Enable phone detection.")
-    parser.add_argument("--no-phone", action="store_true", help="Disable phone detection.")
     parser.add_argument("--prompt", help="Override text prompt.")
     parser.add_argument("--mist", type=int, default=220, help="Mist PWM (0-255).")
     parser.add_argument("--fan", type=int, default=100, help="Fan PWM (0-255).")
+    parser.add_argument("--wind", type=int, default=0, help="Wind intensity (0-100).")
     parser.add_argument("--fire-intensity", type=float, default=None, help="Fire intensity (0.0-1.0).")
     parser.add_argument("--palette", nargs="+", type=int, help="Dominant palette as RGB triplets [r g b r g b ...].")
     parser.add_argument("--pulse", action="store_true", help="Activate pulse effect.")
-    parser.add_argument("--celebration", action="store_true", help="Trigger celebration effect.")
     parser.add_argument("--ip", default="255.255.255.255", help="Destination IP address.")
     parser.add_argument("--port", type=int, default=4210, help="Destination UDP port.")
     parser.add_argument("--rate", type=float, default=1.0, help="Messages per second when repeating.")
@@ -59,19 +56,15 @@ def build_v2_1_payload(args: argparse.Namespace) -> Dict[str, Any]:
     """Build a v2.1 protocol packet."""
     # Start with preset values
     if args.preset:
-        state, people, phone, prompt = PRESETS[args.preset]
+        state, people, prompt = PRESETS[args.preset]
     else:
-        state, people, phone, prompt = "IDLE", 0, False, "Waiting..."
+        state, people, prompt = "IDLE", 0, "Waiting..."
 
     # Override with command-line args
     if args.state:
         state = args.state
     if args.people is not None:
         people = max(0, min(6, args.people))
-    if args.phone:
-        phone = True
-    if args.no_phone:
-        phone = False
     if args.prompt:
         prompt = args.prompt
 
@@ -96,6 +89,17 @@ def build_v2_1_payload(args: argparse.Namespace) -> Dict[str, Any]:
     else:
         fire_intensity = args.fire_intensity
 
+    wind = max(0, min(100, int(args.wind)))
+    wind = int(round(wind / 25.0)) * 25
+    wind = max(0, min(100, wind))
+
+    if state == "PARTY":
+        audio_state = "PARTY"
+    elif state == "FIRE":
+        audio_state = "AMBIENT"
+    else:
+        audio_state = "SILENT"
+
     # Build packet
     packet = {
         "version": 2,
@@ -103,16 +107,15 @@ def build_v2_1_payload(args: argparse.Namespace) -> Dict[str, Any]:
         "fps": 30,
         "state": state,
         "people": people_data,
-        "phone_detected": phone,
         "dominant_palette": palette,
         "prompt": prompt,
         "mist_pwm": max(0, min(255, args.mist)),
         "fan_pwm": max(0, min(255, args.fan)),
+        "wind": wind,
         "pulse_active": args.pulse,
         "entry_flash_id": None,
-        "audio_state": "PARTY" if state == "PARTY" else ("ALERT" if state == "PHONE" else "AMBIENT"),
+        "audio_state": audio_state,
         "party_buildup_progress": 0.0,
-        "celebration": args.celebration,
         "fire_intensity": max(0.0, min(1.0, fire_intensity)),
     }
 
@@ -125,9 +128,9 @@ def send_payload(sock: socket.socket, ip: str, port: int, payload: Dict[str, Any
     sock.sendto(message, (ip, port))
     state = payload.get("state", "???")
     people = len(payload.get("people", []))
-    phone = "📱" if payload.get("phone_detected") else ""
+    wind = payload.get("wind", 0)
     prompt = payload.get("prompt", "")[:40]
-    print(f"✓ {state} | {people} people {phone} | '{prompt}' | Size: {len(message)} bytes")
+    print(f"✓ {state} | {people} people | wind={wind:3d} | '{prompt}' | Size: {len(message)} bytes")
 
 
 def _send_with_repetition(
@@ -247,15 +250,13 @@ def _cycle_presets(
                 preset=state_name,
                 state=None,
                 people=None,
-                phone=False,
-                no_phone=False,
                 prompt=None,
                 mist=220,
                 fan=100,
+                wind=0,
                 fire_intensity=None,
                 palette=None,
                 pulse=False,
-                celebration=False,
             )
             payload = build_v2_1_payload(temp_args)
             _send_with_repetition(sock, ip, port, payload, repeat, rate)
@@ -287,9 +288,8 @@ def run_interactive(args: argparse.Namespace) -> None:
             print(f"Target: {ip}:{port} | Repeat: {repeat if repeat else '∞'} | Rate: {rate:.1f} msg/s\n")
 
             # Show presets
-            for idx, (name, (state, people, phone, prompt)) in enumerate(PRESETS.items(), 1):
-                phone_str = "📱" if phone else ""
-                print(f"  {idx}) {name.title():<12} [{state:<6}] {people} people {phone_str} | {prompt[:35]}")
+            for idx, (name, (state, people, prompt)) in enumerate(PRESETS.items(), 1):
+                print(f"  {idx}) {name.title():<12} [{state:<6}] {people} people | {prompt[:35]}")
 
             print("\n  c) Custom payload")
             print("  a) Auto-cycle presets")
@@ -320,15 +320,13 @@ def run_interactive(args: argparse.Namespace) -> None:
                         preset=preset_name,
                         state=None,
                         people=None,
-                        phone=False,
-                        no_phone=False,
                         prompt=None,
                         mist=220,
                         fan=100,
+                        wind=0,
                         fire_intensity=0.5,
                         palette=None,
                         pulse=False,
-                        celebration=False,
                     )
                     payload = build_v2_1_payload(temp_args)
                     try:
@@ -351,23 +349,21 @@ def run_interactive(args: argparse.Namespace) -> None:
                     people = int(people_input) if people_input else 0
                     people = max(0, min(6, people))
 
-                    phone = input("Phone detected? (y/n) [n]: ").strip().lower() in {"y", "yes"}
-
                     prompt = input("Prompt text [Custom message]: ").strip() or "Custom message"
+                    wind = _prompt_int("Wind (0-100)", 0, minimum=0)
+                    wind = max(0, min(100, wind))
 
                     temp_args = SimpleNamespace(
                         preset=None,
                         state=state,
                         people=people,
-                        phone=phone,
-                        no_phone=False,
                         prompt=prompt,
                         mist=220,
                         fan=100,
+                        wind=wind,
                         fire_intensity=0.5,
                         palette=None,
                         pulse=False,
-                        celebration=False,
                     )
                     payload = build_v2_1_payload(temp_args)
                     _send_with_repetition(sock, ip, port, payload, repeat, rate)
@@ -387,15 +383,13 @@ def run_interactive(args: argparse.Namespace) -> None:
                                 preset=preset_name,
                                 state=None,
                                 people=None,
-                                phone=False,
-                                no_phone=False,
                                 prompt=None,
                                 mist=220,
                                 fan=100,
+                                wind=0,
                                 fire_intensity=0.5,
                                 palette=None,
                                 pulse=False,
-                                celebration=False,
                             )
                             payload = build_v2_1_payload(temp_args)
                             send_payload(sock, ip, port, payload)

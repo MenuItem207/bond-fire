@@ -4,17 +4,12 @@
 # State Machine - Thresholds (seconds)
 state_machine:
   fire_entry_dwell: 0.3       # Debounce IDLE -> FIRE to avoid single-frame flicker
-  frame_rate: 5               # FPS for celebration display and state timing
+  frame_rate: 5               # FPS for state timing
 
 # Prompt Generation - Cooldown Durations (seconds)
 prompts:
   normal_cooldown: 22         # Minimum time between prompts in non-phone states
   same_state_cooldown: 22     # Minimum time between prompts when state is unchanged
-  
-# Celebration Effect - Phone Exit Celebration
-celebration:
-  duration_frames: 10         # Number of frames to display celebration (at frame_rate fps ≈ 2 seconds)
-  # celebration audio (party horn) plays automatically with state change
   
 # Audio System
 audio:

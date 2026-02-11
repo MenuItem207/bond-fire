@@ -27,19 +27,13 @@ def test_integration():
         from bond_fire_vision.state_machine import StateMachine
         sm = StateMachine()
         
-        expected_entry = cfg.state_machine.phone_entry_dwell
-        expected_exit = cfg.state_machine.phone_exit_dwell
-        
-        actual_entry = sm.PHONE_ENTRY_DWELL
-        actual_exit = sm.PHONE_EXIT_DWELL
-        
+        expected_entry = cfg.state_machine.fire_entry_dwell
+        actual_entry = sm.FIRE_ENTRY_DWELL
         entry_ok = actual_entry == expected_entry
-        exit_ok = actual_exit == expected_exit
-        
-        print(f"  PHONE_ENTRY_DWELL: {actual_entry} (expected {expected_entry}) {'✓' if entry_ok else '✗'}")
-        print(f"  PHONE_EXIT_DWELL: {actual_exit} (expected {expected_exit}) {'✓' if exit_ok else '✗'}")
-        
-        if entry_ok and exit_ok:
+
+        print(f"  FIRE_ENTRY_DWELL: {actual_entry} (expected {expected_entry}) {'✓' if entry_ok else '✗'}")
+
+        if entry_ok:
             print("✅ PASS: State machine values match config")
         else:
             print("❌ FAIL: State machine values don't match config")
@@ -55,18 +49,12 @@ def test_integration():
         gen = LocalPromptGenerator()
         
         expected_normal = cfg.prompts.normal_cooldown
-        expected_phone = cfg.prompts.phone_cooldown
-        
         actual_normal = gen._prompt_cooldown
-        actual_phone = gen._phone_cooldown
-        
         normal_ok = actual_normal == expected_normal
-        phone_ok = actual_phone == expected_phone
-        
+
         print(f"  normal_cooldown: {actual_normal}s (expected {expected_normal}s) {'✓' if normal_ok else '✗'}")
-        print(f"  phone_cooldown: {actual_phone}s (expected {expected_phone}s) {'✓' if phone_ok else '✗'}")
-        
-        if normal_ok and phone_ok:
+
+        if normal_ok:
             print("✅ PASS: Prompt cooldowns match config")
         else:
             print("❌ FAIL: Prompt cooldowns don't match config")
@@ -127,16 +115,11 @@ def test_integration():
     # Test 6: Config Values Summary
     print("\n[TEST 6] Configuration Values Summary")
     print(f"\nState Machine:")
-    print(f"  phone_entry_dwell: {cfg.state_machine.phone_entry_dwell}s")
-    print(f"  phone_exit_dwell: {cfg.state_machine.phone_exit_dwell}s")
+    print(f"  fire_entry_dwell: {cfg.state_machine.fire_entry_dwell}s")
     print(f"  frame_rate: {cfg.state_machine.frame_rate} fps")
     
     print(f"\nPrompts:")
     print(f"  normal_cooldown: {cfg.prompts.normal_cooldown}s")
-    print(f"  phone_cooldown: {cfg.prompts.phone_cooldown}s")
-    
-    print(f"\nCelebration:")
-    print(f"  duration_frames: {cfg.celebration.duration_frames} frames")
     
     print(f"\nAudio:")
     print(f"  master_volume: {cfg.audio.master_volume}")
@@ -148,7 +131,6 @@ def test_integration():
     print(f"\nVision:")
     print(f"  confidence_threshold: {cfg.vision.confidence_threshold}")
     print(f"  person_class_id: {cfg.vision.person_class_id}")
-    print(f"  phone_class_id: {cfg.vision.phone_class_id}")
     
     print(f"\nDebug:")
     print(f"  verbose_logging: {cfg.debug.verbose_logging}")

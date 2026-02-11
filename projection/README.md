@@ -48,10 +48,9 @@ Circle + Ring (live adjustments):
 ## Notes
 
 - Mapping quad points are normalized (0..1). Match them to your physical surface.
-- The visuals respond to `state`, `fire_intensity`, `dominant_palette`, `pulse_active`, `party_buildup_progress`, and `celebration`.
-- Phone-related states are `PHONE_IDLE` and `FANNING` (both map to the phone visual profile).
+- The visuals respond to `state`, `fire_intensity`, `dominant_palette`, `pulse_active`, and `party_buildup_progress`.
 - Text prompts are pulled from the packet `prompt` field.
-- `wind` (0-100) is included in packets for hardware/FX synchronization.
+- `wind` (0-100) boosts the fire intensity for wind-driven visuals.
 
 ## Video Layer (Optional)
 

@@ -103,9 +103,6 @@ class BondFireVision:
         self.audio_manager: Optional[AudioManager] = None
 
         cfg = get_config()
-        frame_rate = max(1, cfg.state_machine.frame_rate)
-        self._celebration_duration = cfg.celebration.duration_frames / frame_rate
-        self._celebration_until: Optional[float] = None
         self._same_state_cooldown = cfg.prompts.same_state_cooldown
         self._min_person_area_ratio = max(0.0, cfg.vision.min_person_area_ratio)
         self._frame_width = frame_width or cfg.vision.frame_width
@@ -137,8 +134,6 @@ class BondFireVision:
         self._last_entry_id: Optional[int] = None
         self._party_buildup_started = False
         self._last_buildup_step = 0
-        self._celebration_frames_remaining = 0  # Deprecated: time-based celebration is used instead
-        self._celebration_prompt: Optional[str] = None  # Store celebration prompt to avoid toggling
         self._latest_state_output: Optional[Any] = None  # Cache latest state output for packet building
         self._last_narrated_prompt: Optional[str] = None  # Track last narrated prompt to avoid repeats
         self._last_sent_prompt: Optional[str] = None  # Cache prompt to prevent unnecessary resets
@@ -641,7 +636,6 @@ class BondFireVision:
             entry_flash_id=state_output.entry_flash_id,
             audio_state=audio_state,
             party_buildup_progress=state_output.party_buildup_progress,
-            celebration=False,  # Celebration removed
         )
 
         # Send packet
