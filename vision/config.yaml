@@ -41,18 +41,21 @@ audio:
 
 # Vision Detection
 vision:
-  confidence_threshold: 0.5   # YOLO detection confidence (0.0 to 1.0)
+  confidence_threshold: 0.25  # YOLO detection confidence (0.0 to 1.0)
   person_class_id: 0          # COCO dataset person class
   phone_class_id: 67          # COCO dataset cell phone class
   min_person_area_ratio: 0.15 # Min person bbox area as fraction of frame area
+  frame_width: 1920           # Camera capture width
+  frame_height: 1080          # Camera capture height
+  imgsz: 1280                 # YOLO inference size
 
 # Fanning Detection (Digital Bellows)
 fanning:
   history: 30                 # Number of phone x-positions to keep
   metric: distance            # distance or std
-  movement_threshold: 40.0    # Movement threshold for fanning detection
-  decay: 0.95                 # Fan power decay per frame when not fanning
-  increase_step: 6.0          # Fan power increase per frame when fanning
+  movement_threshold: 28.0    # Movement threshold for fanning detection
+  decay: 0.97                 # Fan power decay per frame when not fanning
+  increase_step: 8.0          # Fan power increase per frame when fanning
   reset_missing: 10           # Frames until history reset when phone missing
   power_threshold: 50.0       # Fan power threshold for FANNING state
   power_hysteresis: 5.0       # Prevents rapid flip-flopping around threshold

@@ -57,6 +57,9 @@ class VisionConfig:
     person_class_id: int
     phone_class_id: int
     min_person_area_ratio: float
+    frame_width: int
+    frame_height: int
+    imgsz: int
 
 
 @dataclass
@@ -176,6 +179,9 @@ def _parse_config(data: dict) -> Config:
             person_class_id=data["vision"]["person_class_id"],
             phone_class_id=data["vision"]["phone_class_id"],
             min_person_area_ratio=data["vision"].get("min_person_area_ratio", 0.01),
+            frame_width=data["vision"].get("frame_width", 1280),
+            frame_height=data["vision"].get("frame_height", 720),
+            imgsz=data["vision"].get("imgsz", 960),
         ),
         fanning=FanningConfig(
             history=data.get("fanning", {}).get("history", 30),

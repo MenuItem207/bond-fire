@@ -61,6 +61,7 @@ class PacketBuilderV2:
         prompt: str,
         mist_pwm: int,
         fan_pwm: int,
+        wind: int,
         fire_intensity: float = 0.0,
         pulse_active: bool = False,
         entry_flash_id: Optional[int] = None,
@@ -79,6 +80,7 @@ class PacketBuilderV2:
             prompt: Display text (max 120 chars)
             mist_pwm: Mist atomizer PWM (0-255)
             fan_pwm: Fan PWM (0-255)
+            wind: Fanning intensity (0-100)
             fire_intensity: Fire intensity (0.0-1.0)
             pulse_active: True during 15s color pulse
             entry_flash_id: Track ID for entry flash (or None)
@@ -129,6 +131,7 @@ class PacketBuilderV2:
         # Clamp PWM values
         mist_pwm = max(0, min(255, mist_pwm))
         fan_pwm = max(0, min(255, fan_pwm))
+        wind = max(0, min(100, int(wind)))
         fire_intensity = max(0.0, min(1.0, fire_intensity))
 
         packet = {
@@ -142,6 +145,7 @@ class PacketBuilderV2:
             "prompt": prompt,
             "mist_pwm": mist_pwm,
             "fan_pwm": fan_pwm,
+            "wind": wind,
             "fire_intensity": round(fire_intensity, 2),
             "pulse_active": pulse_active,
             "entry_flash_id": entry_flash_id,

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import socket
 import time
+from collections import deque
+from statistics import pstdev
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -40,6 +42,9 @@ class BondFireVision:
         self,
         model_path: str = "yolov8n.pt",
         capture_index: int = 0,
+        frame_width: int | None = None,
+        frame_height: int | None = None,
+        imgsz: int | None = None,
         roi: Tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
         detection_confidence: float = 0.5,
         person_confidence: float = 0.6,
@@ -103,6 +108,15 @@ class BondFireVision:
         self._celebration_until: Optional[float] = None
         self._same_state_cooldown = cfg.prompts.same_state_cooldown
         self._min_person_area_ratio = max(0.0, cfg.vision.min_person_area_ratio)
+        self._frame_width = frame_width or cfg.vision.frame_width
+        self._frame_height = frame_height or cfg.vision.frame_height
+        self._imgsz = imgsz or cfg.vision.imgsz
+        self._fanning_history = max(2, cfg.fanning.history)
+        self._fanning_metric = cfg.fanning.metric
+        self._fanning_threshold = cfg.fanning.movement_threshold
+        self._fanning_decay = cfg.fanning.decay
+        self._fanning_increase_step = cfg.fanning.increase_step
+        self._fanning_reset_missing = cfg.fanning.reset_missing
 
         if enable_audio:
             self.audio_manager = AudioManager(
@@ -131,6 +145,10 @@ class BondFireVision:
         self._pulse_prompt: Optional[str] = None
         self._pulse_prompt_duration = 2.0
         self._pulse_active_last = False
+        self._fan_power = 0.0
+        self._phone_missing_frames = 0
+        self._phone_x_history: deque[float] = deque(maxlen=self._fanning_history)
+        self._phone_detected = False
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -145,6 +163,8 @@ class BondFireVision:
         self.cap = cv2.VideoCapture(self.capture_index)
         if not self.cap.isOpened():
             raise RuntimeError("Could not open video source")
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
 
         print(
             "Starting vision system. Press 'q' to exit." if display else "Starting vision system. Ctrl+C to exit.",
@@ -213,12 +233,19 @@ class BondFireVision:
         person_count = 0
         phone_detected = False
         people_in_roi: list[Person] = []
+        best_phone: tuple[float, float, float, float, float] | None = None
 
         if annotate:
             self._draw_roi(frame, roi_pixels)
 
         # Use track() instead of model() for persistent IDs
-        results = self.model.track(frame, persist=True, verbose=False, conf=self.detection_confidence)
+        results = self.model.track(
+            frame,
+            persist=True,
+            verbose=False,
+            conf=self.detection_confidence,
+            imgsz=self._imgsz,
+        )
         
         for result in results:
             if result.boxes is None or result.boxes.id is None:
@@ -270,6 +297,8 @@ class BondFireVision:
                     inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
                     if inside:
                         phone_detected = True
+                        if best_phone is None or conf > best_phone[0]:
+                            best_phone = (conf, x1, y1, x2, y2)
                     if annotate:
                         color = (0, 0, 255) if inside else (160, 160, 255)
                         thickness = 2 if inside else 1
@@ -277,10 +306,29 @@ class BondFireVision:
                         label = "PHONE" if inside else "PHONE (out)"
                         cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
+        if best_phone is not None:
+            _, x1, y1, x2, y2 = best_phone
+            cx = (x1 + x2) * 0.5
+            self._phone_x_history.append(cx)
+            self._phone_missing_frames = 0
+        else:
+            self._phone_missing_frames += 1
+            if self._phone_missing_frames >= self._fanning_reset_missing:
+                self._phone_x_history.clear()
+
+        movement = self._compute_fan_movement(self._phone_x_history)
+        if phone_detected and movement > self._fanning_threshold:
+            self._fan_power = min(100.0, self._fan_power + self._fanning_increase_step)
+        else:
+            self._fan_power *= self._fanning_decay
+        self._fan_power = max(0.0, min(100.0, self._fan_power))
+        self._phone_detected = phone_detected
+
         # Update state machine
         context = StateContext(
             people_count=person_count,
             phone_detected=phone_detected,
+            fan_power=self._fan_power,
             timestamp=time.monotonic(),
         )
         active_ids = {p.id for p in people_in_roi}
@@ -311,6 +359,27 @@ class BondFireVision:
         (text_w, _), _ = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
         cv2.rectangle(frame, (5, 5), (15 + text_w, 40), (0, 0, 0), -1)
         cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+
+        height, width = frame.shape[:2]
+        bar_w = int(width * 0.35)
+        bar_h = 18
+        x1 = 10
+        y1 = height - bar_h - 12
+        x2 = x1 + bar_w
+        y2 = y1 + bar_h
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (40, 40, 40), 2)
+        fill_w = int(bar_w * (max(0.0, min(100.0, self._fan_power)) / 100.0))
+        if fill_w > 2:
+            cv2.rectangle(frame, (x1 + 2, y1 + 2), (x1 + fill_w - 2, y2 - 2), (0, 140, 255), -1)
+        cv2.putText(
+            frame,
+            f"Wind: {self._fan_power:5.1f}%",
+            (x1, y1 - 6),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            2,
+        )
 
     def _is_inside_roi(self, box: tuple[float, float, float, float], roi_pixels: tuple[int, int, int, int]) -> bool:
         """Check if bounding box center is in ROI with expanded tolerance."""
@@ -376,7 +445,8 @@ class BondFireVision:
         phone_flag = len(people) > 0 and any(p for p in people)  # Simplified
         context = StateContext(
             people_count=len(people),
-            phone_detected=self.state_machine.state == State.PHONE,
+            phone_detected=self._phone_detected,
+            fan_power=self._fan_power,
             timestamp=timestamp,
         )
         
@@ -506,6 +576,7 @@ class BondFireVision:
             prompt=prompt,
             mist_pwm=state_output.mist_pwm,
             fan_pwm=state_output.fan_pwm,
+            wind=int(round(self._fan_power)),
             fire_intensity=state_output.fire_intensity,
             pulse_active=state_output.pulse_active,
             entry_flash_id=state_output.entry_flash_id,
@@ -529,6 +600,18 @@ class BondFireVision:
             return AudioState.AMBIENT
         elif state == State.PARTY:
             return AudioState.PARTY
-        elif state == State.PHONE:
-            return AudioState.ALERT
+        elif state in (State.PHONE_IDLE, State.FANNING):
+            return AudioState.AMBIENT
         return AudioState.SILENT
+
+    def _compute_fan_movement(self, x_history: deque[float]) -> float:
+        if len(x_history) < 2:
+            return 0.0
+        if self._fanning_metric == "std":
+            return float(pstdev(x_history))
+        total = 0.0
+        last = x_history[0]
+        for value in list(x_history)[1:]:
+            total += abs(value - last)
+            last = value
+        return total

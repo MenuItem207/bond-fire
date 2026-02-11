@@ -1,7 +1,7 @@
 """State machine for Bondfire installation.
 
-Manages transitions between IDLE, FIRE, PARTY, and PHONE states with
-event-driven timers and thresholds.
+Manages transitions between IDLE, FIRE, PARTY, PHONE_IDLE, and FANNING states
+with event-driven timers and thresholds.
 """
 
 from __future__ import annotations
@@ -187,7 +187,7 @@ class StateMachine:
             self._phone_entry_start = None
             self._phone_target_state = None
 
-        # Evaluate non-PHONE states
+        # Evaluate non-phone states
         if self.state not in (State.PHONE_IDLE, State.FANNING):
             # IDLE logic
             if people_count == 0:
@@ -414,8 +414,10 @@ class StateMachine:
         self._fire_entry_start = None
         self._phone_entry_start = None
         self._phone_exit_start = None
+        self._phone_target_state = None
         self._last_pulse_time = None
         self._entry_flash_until = None
         self._entry_flash_id = None
         self._last_people_count = 0
         self._known_ids.clear()
+        self._phone_just_exited = False

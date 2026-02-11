@@ -34,8 +34,11 @@ def _parse_roi(values: list[float]) -> Tuple[float, float, float, float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Bond Fire vision detector (v2.0).")
-    parser.add_argument("--model", default="yolov8n.pt", help="Path to a YOLOv8 weights file.")
+    parser.add_argument("--model", default="yolov8m.pt", help="Path to a YOLOv8 weights file.")
     parser.add_argument("--camera-index", type=int, default=0, help="Index of the camera to open.")
+    parser.add_argument("--frame-width", type=int, default=None, help="Camera capture width.")
+    parser.add_argument("--frame-height", type=int, default=None, help="Camera capture height.")
+    parser.add_argument("--imgsz", type=int, default=None, help="YOLO inference size.")
     parser.add_argument(
         "--roi",
         type=float,
@@ -47,7 +50,7 @@ def main() -> None:
     parser.add_argument(
         "--confidence",
         type=float,
-        default=0.5,
+        default=0.35,
         help="Minimum detection confidence between 0 and 1.",
     )
     parser.add_argument(
@@ -160,6 +163,9 @@ def main() -> None:
             vision = BondFireVision(
                 model_path=args.model,
                 capture_index=args.camera_index,
+                frame_width=args.frame_width,
+                frame_height=args.frame_height,
+                imgsz=args.imgsz,
                 roi=roi,
                 detection_confidence=args.confidence,
                 broadcast_ip=args.broadcast_ip,
@@ -209,16 +215,18 @@ def _run_manual_state(
     manual_state = {
         "people_count": 0,
         "phone_detected": False,
+        "fan_power": 0.0,
     }
     last_entry_id: int | None = None
     celebration_frames_remaining = 0
     celebration_prompt: str | None = None
     last_prompt_state: State | None = None
 
-    def _set_state(people_count: int, phone_detected: bool) -> None:
+    def _set_state(people_count: int, phone_detected: bool, fan_power: float = 0.0) -> None:
         with state_lock:
             manual_state["people_count"] = people_count
             manual_state["phone_detected"] = phone_detected
+            manual_state["fan_power"] = fan_power
 
     def _worker() -> None:
         nonlocal last_entry_id
@@ -239,10 +247,12 @@ def _run_manual_state(
             with state_lock:
                 people_count = manual_state["people_count"]
                 phone_detected = manual_state["phone_detected"]
+                fan_power = manual_state["fan_power"]
 
             context = StateContext(
                 people_count=people_count,
                 phone_detected=phone_detected,
+                fan_power=fan_power,
                 timestamp=now,
             )
             active_ids = set(range(1, people_count + 1))
@@ -313,6 +323,7 @@ def _run_manual_state(
                 prompt=prompt,
                 mist_pwm=mist_pwm,
                 fan_pwm=fan_pwm,
+                wind=int(round(fan_power)),
                 fire_intensity=fire_intensity,
                 pulse_active=state_output.pulse_active,
                 entry_flash_id=state_output.entry_flash_id,
@@ -329,7 +340,7 @@ def _run_manual_state(
 
             if now - last_log >= 1.0:
                 print(
-                    f"[MANUAL] {state.value} | people={people_count} | fire={fire_intensity:.2f}",
+                    f"[MANUAL] {state.value} | people={people_count} | fire={fire_intensity:.2f} | wind={fan_power:.0f}",
                     flush=True,
                 )
                 last_log = now
@@ -345,20 +356,22 @@ def _run_manual_state(
             _print_manual_menu()
             choice = input("Select scenario: ").strip()
             if choice == "1":
-                _set_state(0, False)
+                _set_state(0, False, 0.0)
             elif choice == "2":
-                _set_state(1, False)
+                _set_state(1, False, 0.0)
             elif choice == "3":
-                _set_state(3, False)
+                _set_state(3, False, 0.0)
             elif choice == "4":
-                _set_state(4, False)
+                _set_state(4, False, 0.0)
             elif choice == "5":
-                _set_state(5, False)
+                _set_state(5, False, 0.0)
             elif choice == "6":
-                _set_state(3, True)
+                _set_state(3, True, 20.0)
             elif choice == "7":
-                _set_state(3, False)
+                _set_state(3, True, 80.0)
             elif choice == "8":
+                _set_state(3, False, 0.0)
+            elif choice == "9":
                 break
             else:
                 print("Invalid selection. Try again.", flush=True)
@@ -378,9 +391,10 @@ def _print_manual_menu() -> None:
     print("3) FIRE (3 people)", flush=True)
     print("4) FIRE (4 people)", flush=True)
     print("5) PARTY (5 people)", flush=True)
-    print("6) PHONE detected (3 people)", flush=True)
-    print("7) PHONE removed (3 people)", flush=True)
-    print("8) Quit", flush=True)
+    print("6) PHONE_IDLE (3 people, low wind)", flush=True)
+    print("7) FANNING (3 people, high wind)", flush=True)
+    print("8) PHONE removed (3 people)", flush=True)
+    print("9) Quit", flush=True)
 
 
 def _create_socket(broadcast_ip: str, broadcast_port: int) -> socket.socket:
@@ -416,8 +430,8 @@ def _map_audio_state(state: State) -> AudioState:
         return AudioState.AMBIENT
     if state == State.PARTY:
         return AudioState.PARTY
-    if state == State.PHONE:
-        return AudioState.ALERT
+    if state in (State.PHONE_IDLE, State.FANNING):
+        return AudioState.AMBIENT
     return AudioState.SILENT
 
 if __name__ == "__main__":
