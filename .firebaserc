@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "bondfire-app",
+    "dev": "bondfire-app-d778f"
+  },
+  "targets": {},
+  "etags": {}
+}

@@ -56,7 +56,6 @@ class PacketBuilderV2:
         self,
         state: State,
         people: list[Person],
-        phone_detected: bool,
         dominant_palette: list[int],
         prompt: str,
         mist_pwm: int,
@@ -75,7 +74,6 @@ class PacketBuilderV2:
         Args:
             state: Current state machine state
             people: List of tracked people
-            phone_detected: Phone detection flag
             dominant_palette: Flattened RGB palette [r,g,b,r,g,b,...]
             prompt: Display text (max 120 chars)
             mist_pwm: Mist atomizer PWM (0-255)
@@ -140,7 +138,6 @@ class PacketBuilderV2:
             "fps": round(avg_fps, 1),
             "state": state.value,
             "people": people_data,
-            "phone_detected": phone_detected,
             "dominant_palette": palette,
             "prompt": prompt,
             "mist_pwm": mist_pwm,

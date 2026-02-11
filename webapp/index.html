@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bond Fire - Fan the Flames</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 20px 0;
+        }
+
+        .container {
+            text-align: center;
+            padding: 20px;
+            max-width: 500px;
+            width: 90%;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #ff6b6b, #ff9068);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            color: #aaa;
+            margin-bottom: 40px;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .status.connecting {
+            background: rgba(255, 193, 7, 0.2);
+            border: 2px solid rgba(255, 193, 7, 0.5);
+            color: #ffc107;
+        }
+
+        .status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            border: 2px solid rgba(76, 175, 80, 0.5);
+            color: #4caf50;
+        }
+
+        .status.error {
+            background: rgba(244, 67, 54, 0.2);
+            border: 2px solid rgba(244, 67, 54, 0.5);
+            color: #f44336;
+        }
+
+        .fire-button {
+            width: 250px;
+            height: 250px;
+            border-radius: 50%;
+            border: 5px solid #ff6b6b;
+            background: radial-gradient(circle at 30% 30%, #ff9068, #ff6b6b, #c44569);
+            font-size: 1.5em;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 40px rgba(255, 107, 107, 0.4);
+            transition: all 0.3s ease;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .fire-button:active {
+            transform: scale(0.95);
+            box-shadow: 0 5px 20px rgba(255, 107, 107, 0.6);
+        }
+
+        .fire-button.shaking {
+            animation: shake-pulse 0.5s ease;
+            background: radial-gradient(circle at 30% 30%, #ffb068, #ff8b6b, #ff4569);
+            box-shadow: 0 20px 60px rgba(255, 107, 107, 0.8);
+        }
+
+        @keyframes shake-pulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.1);
+            }
+        }
+
+        .instructions {
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            font-size: 1em;
+            line-height: 1.6;
+        }
+
+        .stats {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            margin: 10px;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #aaa;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #ff6b6b;
+        }
+
+        .permission-prompt {
+            padding: 20px;
+            background: rgba(255, 193, 7, 0.15);
+            border: 2px solid rgba(255, 193, 7, 0.4);
+            border-radius: 10px;
+            margin-bottom: 20px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .permission-prompt p {
+            margin: 10px 0;
+            line-height: 1.5;
+        }
+
+        .permission-prompt ol {
+            text-align: left;
+            margin: 15px 20px;
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
+        .skip-note {
+            font-size: 0.95em;
+            color: #aaa;
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+
+        .skip-note strong {
+            color: #4caf50;
+        }
+
+        details {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        details summary {
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            transition: background 0.2s ease;
+        }
+
+        details summary:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        details ol {
+            text-align: left;
+            font-size: 0.85em;
+            line-height: 1.6;
+            margin: 15px auto;
+            max-width: 300px;
+            padding-left: 25px;
+        }
+
+        details .btn {
+            margin-top: 15px;
+        }
+
+        .btn {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            background: #ff5252;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔥 Bond Fire</h1>
+        <p class="subtitle">Fan the flames with your phone</p>
+
+        <div id="status" class="status connecting">Connecting to RTDB...</div>
+
+        <div id="permission-prompt" class="permission-prompt" style="display: none;">
+            <p><strong>🎮 Two Ways to Play:</strong></p>
+            <div class="skip-note">
+                <strong>Easy Way:</strong> Just tap the fire button below!<br>
+                Works exactly the same as shaking. No permission needed. ✨
+            </div>
+            <p style="margin-top: 20px; font-size: 0.9em;">OR enable shake detection:</p>
+            <button class="btn" onclick="requestMotionPermission()">Enable Shake Detection</button>
+            <p style="font-size: 0.8em; color: #999; margin-top: 10px;">
+                (iOS will ask for motion sensor permission)
+            </p>
+        </div>
+
+        <div id="fire-button" class="fire-button">
+            Shake to Fan
+        </div>
+
+        <div class="instructions">
+            <strong>How to play:</strong><br>
+            Shake your phone to fan the flames!<br>
+            More people shaking = bigger flames 🔥
+        </div>
+
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-label">Your Shakes</div>
+                <div class="stat-value" id="shake-count">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Active Fans</div>
+                <div class="stat-value" id="active-fans">0</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDummyKeyForLocalDev",
+            authDomain: "bondfire-app-d778f.firebaseapp.com",
+            databaseURL: "https://bondfire-app-d778f-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "bondfire-app-d778f",
+            storageBucket: "bondfire-app-d778f.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef123456"
+        };
+
+        // Initialize Firebase (retry until SDK is available)
+        let app = null;
+        let database = null;
+        let firebaseReady = false;
+        let firebaseInitAttempts = 0;
+        const FIREBASE_RETRY_MS = 500;
+
+        // Configuration
+        const SHAKE_THRESHOLD = 15; // m/s² (lowered from 20 for better sensitivity)
+        const SHAKE_COOLDOWN = 500; // ms between shakes
+
+        // State
+        let userId = getUserId();
+        let shakeCount = 0;
+        let lastShakeTime = 0;
+        let activeFans = new Set();
+        let motionPermissionGranted = false;
+        let isConnected = true; // Firebase is always "connected" once initialized
+
+        // Get or create user ID
+        function getUserId() {
+            let id = localStorage.getItem('bondfire_user_id');
+            if (!id) {
+                id = 'user_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('bondfire_user_id', id);
+            }
+            return id;
+        }
+
+        // Update status message
+        function updateStatus(message, type = 'connecting') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+
+        // Initialize Firebase connection and show status
+        function initializeFirebase() {
+            if (firebaseReady) {
+                return true;
+            }
+
+            if (typeof firebase === 'undefined') {
+                firebaseInitAttempts++;
+                if (firebaseInitAttempts === 1) {
+                    updateStatus('Connecting to RTDB...', 'connecting');
+                }
+                setTimeout(initializeFirebase, FIREBASE_RETRY_MS);
+                return false;
+            }
+
+            try {
+                if (firebase.apps && firebase.apps.length) {
+                    app = firebase.app();
+                } else {
+                    app = firebase.initializeApp(firebaseConfig);
+                }
+                database = firebase.database();
+                firebaseReady = true;
+                console.log('✅ Firebase SDK loaded and initialized');
+                updateStatus('🔥 Connected - Ready to Fan!', 'connected');
+                return true;
+            } catch (err) {
+                console.error('❌ Firebase initialization failed:', err);
+                updateStatus('RTDB init failed - check console', 'error');
+                return false;
+            }
+        }
+
+        // Publish shake event to Firebase Realtime Database
+        function publishShake() {
+            if (!firebaseReady || !database) {
+                const initialized = initializeFirebase();
+                if (!initialized) {
+                    console.warn('Firebase not ready');
+                    return;
+                }
+            }
+
+            try {
+                const timestampMs = Date.now();
+                const timestampSec = Math.floor(timestampMs / 1000);
+                const shakeRef = database.ref(`shakes/${timestampSec}/${userId}`);
+                shakeRef.set({
+                    user_id: userId,
+                    timestamp: timestampSec,
+                    timestamp_ms: timestampMs
+                }).then(() => {
+                    console.log('✅ Shake published to Firebase!');
+                    shakeCount++;
+                    document.getElementById('shake-count').textContent = shakeCount;
+
+                    // Visual feedback
+                    const button = document.getElementById('fire-button');
+                    button.classList.add('shaking');
+                    setTimeout(() => button.classList.remove('shaking'), 500);
+                }).catch((err) => {
+                    console.error('Failed to publish shake:', err);
+                });
+            } catch (err) {
+                console.error('Error publishing shake:', err);
+            }
+        }
+
+        // Request motion permission (iOS 13+)
+        async function requestMotionPermission() {
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                try {
+                    const permission = await DeviceMotionEvent.requestPermission();
+                    if (permission === 'granted') {
+                        motionPermissionGranted = true;
+                        document.getElementById('permission-prompt').style.display = 'none';
+                        setupMotionDetection();
+                    } else {
+                        console.error('Motion permission denied by user');
+                        updateStatus('🖱️ Tap Mode - Button works perfectly!', 'connected');
+                        document.getElementById('permission-prompt').innerHTML = `
+                            <div class="skip-note">
+                                <strong>✅ No Problem!</strong><br>
+                                Just tap the fire button - works exactly the same! 🔥
+                            </div>
+                            <details>
+                                <summary>Want shake detection? (Optional)</summary>
+                                <ol>
+                                    <li>Open <strong>Settings</strong> app</li>
+                                    <li>Scroll to <strong>Safari</strong></li>
+                                    <li>Enable <strong>Motion & Orientation Access</strong></li>
+                                    <li>Return here and reload</li>
+                                </ol>
+                                <button class="btn" onclick="location.reload()">Reload Page</button>
+                            </details>
+                        `;
+                    }
+                } catch (err) {
+                    console.error('Permission request failed:', err);
+                    updateStatus('Permission error - check iOS Settings', 'error');
+                }
+            } else {
+                // No permission needed (Android, older iOS)
+                motionPermissionGranted = true;
+                document.getElementById('permission-prompt').style.display = 'none';
+                setupMotionDetection();
+            }
+        }
+
+        // Detect shake from motion
+        function setupMotionDetection() {
+            let lastX = 0, lastY = 0, lastZ = 0;
+            let motionEventCount = 0;
+
+            console.log('🎯 Motion detection setup started');
+            console.log('Permission granted:', motionPermissionGranted);
+
+            window.addEventListener('devicemotion', (event) => {
+                motionEventCount++;
+
+                // Log first few events for debugging
+                if (motionEventCount <= 3) {
+                    console.log(`Motion event #${motionEventCount}:`, event.acceleration);
+                }
+
+                if (!motionPermissionGranted) {
+                    console.warn('Motion blocked: permission not granted');
+                    return;
+                }
+
+                const acc = event.accelerationIncludingGravity;
+                if (!acc || acc.x === null || acc.y === null || acc.z === null) {
+                    if (motionEventCount <= 3) {
+                        console.warn('No acceleration data available');
+                    }
+                    return;
+                }
+
+                const deltaX = Math.abs(acc.x - lastX);
+                const deltaY = Math.abs(acc.y - lastY);
+                const deltaZ = Math.abs(acc.z - lastZ);
+
+                const totalDelta = deltaX + deltaY + deltaZ;
+
+                // Log significant motion for debugging
+                if (totalDelta > 10 && motionEventCount % 10 === 0) {
+                    console.log(`Motion delta: ${totalDelta.toFixed(1)} (threshold: ${SHAKE_THRESHOLD})`);
+                }
+
+                if (totalDelta > SHAKE_THRESHOLD) {
+                    const now = Date.now();
+                    if (now - lastShakeTime > SHAKE_COOLDOWN) {
+                        console.log('🔥 SHAKE DETECTED! Delta:', totalDelta.toFixed(1));
+                        publishShake();
+                        lastShakeTime = now;
+                    }
+                }
+
+                lastX = acc.x;
+                lastY = acc.y;
+                lastZ = acc.z;
+            });
+
+            // Test after 2 seconds if events are firing
+            setTimeout(() => {
+                if (motionEventCount === 0) {
+                    console.error('❌ No motion events detected! Device may not support motion sensors.');
+                    updateStatus('Motion sensors not available - tap button instead', 'error');
+                } else {
+                    console.log(`✅ Motion detection active (${motionEventCount} events received)`);
+                }
+            }, 2000);
+        }
+
+        // Initialize
+        window.addEventListener('load', () => {
+            console.log('🚀 App initializing...');
+            console.log('User ID:', userId);
+            console.log('Device supports motion?', typeof DeviceMotionEvent !== 'undefined');
+            console.log('Needs permission?', typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function');
+
+            initializeFirebase();
+
+            // Check if motion permission is needed (iOS 13+)
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                console.log('📱 iOS device detected - permission required');
+                document.getElementById('permission-prompt').style.display = 'block';
+            } else {
+                console.log('✅ Auto-enabling motion detection (Android/Desktop)');
+                motionPermissionGranted = true;
+                setupMotionDetection();
+            }
+
+            // Handle button tap (alternative to shake)
+            document.getElementById('fire-button').addEventListener('click', () => {
+                const now = Date.now();
+                if (now - lastShakeTime > SHAKE_COOLDOWN) {
+                    console.log('🖱️ Button tapped!');
+                    publishShake();
+                    lastShakeTime = now;
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>

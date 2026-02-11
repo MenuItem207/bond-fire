@@ -4,6 +4,7 @@ numpy
 pygame>=2.0.0
 pyttsx3>=2.90
 pyyaml
+firebase-admin>=6.0.0
 
 [legacy]
 openai>=1.60.0

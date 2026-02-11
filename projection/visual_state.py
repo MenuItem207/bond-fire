@@ -8,7 +8,6 @@ from typing import List
 class VisualState:
     state_name: str = "IDLE"
     people_count: int = 0
-    phone_detected: bool = False
     dominant_palette: List[int] = field(default_factory=list)
     prompt: str = ""
     fire_intensity: float = 0.0
@@ -20,7 +19,6 @@ class VisualState:
     def update_from_packet(self, packet: dict) -> None:
         self.state_name = str(packet.get("state", self.state_name))
         self.people_count = int(len(packet.get("people", [])))
-        self.phone_detected = bool(packet.get("phone_detected", False))
         self.dominant_palette = list(packet.get("dominant_palette", self.dominant_palette))
         self.prompt = str(packet.get("prompt", self.prompt))
         self.fire_intensity = float(packet.get("fire_intensity", self.fire_intensity))

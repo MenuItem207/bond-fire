@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import socket
+import threading
 import time
-from collections import deque
-from statistics import pstdev
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -20,6 +19,7 @@ from .color_analysis import (
     get_palette_from_people,
 )
 from .local_prompts import LocalPromptGenerator
+from .firebase_shake import FirebaseShakeListener
 from .packet_builder import PacketBuilderV2, Person
 from .state_machine import State, StateContext, StateMachine
 
@@ -29,19 +29,18 @@ class VisionState:
     """Detection state (for backward compatibility)."""
 
     people_in_roi: int
-    phone_detected: bool
 
 
 class BondFireVision:
-    """People and phone detection within a configurable active zone."""
+    """People detection within a configurable active zone."""
 
     CLASS_PERSON = 0
-    CLASS_PHONE = 67
 
     def __init__(
         self,
         model_path: str = "yolov8n.pt",
         capture_index: int = 0,
+        camera_backend: str | None = None,
         frame_width: int | None = None,
         frame_height: int | None = None,
         imgsz: int | None = None,
@@ -88,6 +87,7 @@ class BondFireVision:
 
         self.model = YOLO(model_path)
         self.capture_index = capture_index
+        self.camera_backend = camera_backend
         self.roi = roi
         self.detection_confidence = detection_confidence
         self.person_confidence = max(detection_confidence, person_confidence)
@@ -107,20 +107,21 @@ class BondFireVision:
         self._celebration_duration = cfg.celebration.duration_frames / frame_rate
         self._celebration_until: Optional[float] = None
         self._same_state_cooldown = cfg.prompts.same_state_cooldown
-        self._phone_idle_prompt_delay = cfg.prompts.phone_idle_prompt_delay
         self._min_person_area_ratio = max(0.0, cfg.vision.min_person_area_ratio)
         self._frame_width = frame_width or cfg.vision.frame_width
         self._frame_height = frame_height or cfg.vision.frame_height
         self._imgsz = imgsz or cfg.vision.imgsz
-        self._phone_confidence = cfg.vision.phone_confidence_threshold
         self._iou_threshold = cfg.vision.iou_threshold
-        self._phone_persistence_frames = cfg.vision.phone_persistence_frames
-        self._fanning_history = max(2, cfg.fanning.history)
-        self._fanning_metric = cfg.fanning.metric
-        self._fanning_threshold = cfg.fanning.movement_threshold
-        self._fanning_decay = cfg.fanning.decay
-        self._fanning_increase_step = cfg.fanning.increase_step
-        self._fanning_reset_missing = cfg.fanning.reset_missing
+
+        # RTDB shake listener (lazy init to avoid impacting camera startup)
+        self._shake_listener: Optional[FirebaseShakeListener] = None
+        self._firebase_cfg = cfg.firebase if cfg.firebase.enabled else None
+        self._shake_listener_lock = threading.Lock()
+        self._shake_listener_thread_started = False
+        self._wind_udp_cfg = cfg.wind_udp
+        self._wind_udp_value = 0
+        self._wind_udp_last_update = 0.0
+        self._wind_udp_lock = threading.Lock()
 
         if enable_audio:
             self.audio_manager = AudioManager(
@@ -149,15 +150,6 @@ class BondFireVision:
         self._pulse_prompt: Optional[str] = None
         self._pulse_prompt_duration = 2.0
         self._pulse_active_last = False
-        self._fan_power = 0.0
-        self._phone_missing_frames = 0
-        self._phone_x_history: deque[float] = deque(maxlen=self._fanning_history)
-        self._phone_detected = False
-        self._phone_debounce_detect = cfg.vision.phone_debounce_frames_detect
-        self._phone_debounce_lose = cfg.vision.phone_debounce_frames_lose
-        self._phone_raw_detected_count = 0
-        self._phone_raw_missing_count = 0
-        self._phone_persistence_counter = 0  # Frames since last raw phone detection
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -169,11 +161,21 @@ class BondFireVision:
             Last known detection state.
         """
         sock = self._create_socket()
-        self.cap = cv2.VideoCapture(self.capture_index)
-        if not self.cap.isOpened():
-            raise RuntimeError("Could not open video source")
+        self.cap = self._open_camera()
+        if not self.cap or not self.cap.isOpened():
+            raise RuntimeError(
+                "Could not open video source. Check camera index and macOS camera permissions for the Python/Terminal app."
+            )
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._frame_width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frame_height)
+
+        if display:
+            try:
+                cv2.namedWindow("Bond Fire Vision", cv2.WINDOW_NORMAL)
+            except cv2.error as exc:
+                print(f"⚠️  OpenCV display init failed: {exc}")
+                print("ℹ️  Continuing without preview window.")
+                display = False
 
         print(
             "Starting vision system. Press 'q' to exit." if display else "Starting vision system. Ctrl+C to exit.",
@@ -185,15 +187,55 @@ class BondFireVision:
         if self.audio_manager:
             self.audio_manager.start()
 
+        # Defer RTDB listener initialization until after the first frame.
+        shake_listener_started = False
+
         previous_state: VisionState | None = None
-        state = VisionState(people_in_roi=0, phone_detected=False)
+        state = VisionState(people_in_roi=0)
         last_send = 0.0
+        frames_read = 0
+        last_heartbeat = time.monotonic()
+        heartbeat_interval = 5.0
+        last_frame_time = time.monotonic()
+        stop_event = threading.Event()
+        wind_udp_thread: Optional[threading.Thread] = None
+
+        if self._wind_udp_cfg.enabled:
+            wind_udp_thread = threading.Thread(
+                target=self._wind_udp_listener,
+                args=(stop_event,),
+                daemon=True,
+            )
+            wind_udp_thread.start()
+
+        def camera_watchdog() -> None:
+            nonlocal last_frame_time
+            while not stop_event.is_set():
+                now = time.monotonic()
+                if now - last_frame_time > 5.0:
+                    print(
+                        "⚠️  No camera frames received in 5s. Camera may be in use or permissions blocked.",
+                        flush=True,
+                    )
+                    # Avoid spamming logs if the camera remains blocked
+                    last_frame_time = now
+                time.sleep(1.0)
+
+        watchdog_thread = threading.Thread(target=camera_watchdog, daemon=True)
+        watchdog_thread.start()
 
         try:
             while True:
                 ret, frame = self.cap.read()
                 if not ret:
                     raise RuntimeError("Failed to read frame from camera")
+
+                if self._firebase_cfg and not shake_listener_started:
+                    self._start_firebase_listener_async()
+                    shake_listener_started = True
+
+                frames_read += 1
+                last_frame_time = time.monotonic()
 
                 state, processed_frame = self.analyze_frame(frame, annotate=display)
                 now = time.monotonic()
@@ -202,14 +244,29 @@ class BondFireVision:
                     self._send_update(sock, now)
                     last_send = now
 
+                if now - last_heartbeat >= heartbeat_interval:
+                    stats = self.packet_builder.get_stats()
+                    print(
+                        f"Heartbeat: {frames_read} frames, {stats['total_packets']} packets sent",
+                        flush=True,
+                    )
+                    frames_read = 0
+                    last_heartbeat = now
+
                 if display:
-                    cv2.imshow("Bond Fire Vision", processed_frame)
-                    if cv2.waitKey(1) & 0xFF == ord("q"):
-                        break
+                    try:
+                        cv2.imshow("Bond Fire Vision", processed_frame)
+                        if cv2.waitKey(1) & 0xFF == ord("q"):
+                            break
+                    except cv2.error as exc:
+                        print(f"⚠️  OpenCV display error: {exc}")
+                        print("ℹ️  Disabling preview window and continuing headless.")
+                        display = False
                 else:
                     if state != previous_state:
+                        wind = self._shake_listener.get_wind_value() if self._shake_listener else 0
                         print(
-                            f"Active zone: {state.people_in_roi} people | Phone detected: {'YES' if state.phone_detected else 'NO'}",
+                            f"Active zone: {state.people_in_roi} people | Wind: {wind:.0f}%",
                             flush=True,
                         )
                         previous_state = state
@@ -220,6 +277,7 @@ class BondFireVision:
                 sock.close()
             except OSError:
                 pass
+            stop_event.set()
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
@@ -227,6 +285,8 @@ class BondFireVision:
                 cv2.destroyAllWindows()
             if self.audio_manager:
                 self.audio_manager.stop()
+            if self._shake_listener:
+                self._shake_listener.stop()
 
             # Print stats
             stats = self.packet_builder.get_stats()
@@ -234,27 +294,72 @@ class BondFireVision:
 
         return state
 
+    def _start_firebase_listener_async(self) -> None:
+        with self._shake_listener_lock:
+            if self._shake_listener_thread_started or not self._firebase_cfg:
+                return
+            self._shake_listener_thread_started = True
+
+        def _worker() -> None:
+            listener = FirebaseShakeListener(
+                firebase_url=self._firebase_cfg.database_url,
+                credentials_path=self._firebase_cfg.credentials_path,
+                max_concurrent_shakes=self._firebase_cfg.max_concurrent_shakes,
+                shake_timeout=self._firebase_cfg.shake_timeout,
+                wind_max=self._firebase_cfg.wind_max,
+            )
+            listener.start()
+            with self._shake_listener_lock:
+                self._shake_listener = listener
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _open_camera(self) -> cv2.VideoCapture | None:
+        """Open a camera with sensible backend fallbacks on macOS."""
+        backend_override = None
+        if self.camera_backend == "avf":
+            backend_override = cv2.CAP_AVFOUNDATION
+        elif self.camera_backend == "any":
+            backend_override = cv2.CAP_ANY
+        elif self.camera_backend == "default":
+            backend_override = None
+
+        backends = []
+        if backend_override is not None:
+            backends.append(backend_override)
+        backends.extend([cv2.CAP_AVFOUNDATION, cv2.CAP_ANY])
+        for backend in backends:
+            cap = cv2.VideoCapture(self.capture_index, backend)
+            if cap.isOpened():
+                backend_name = "AVFOUNDATION" if backend == cv2.CAP_AVFOUNDATION else "ANY"
+                print(f"📷 Camera opened (index={self.capture_index}, backend={backend_name})", flush=True)
+                return cap
+            cap.release()
+
+        cap = cv2.VideoCapture(self.capture_index)
+        if cap.isOpened():
+            print(f"📷 Camera opened (index={self.capture_index}, backend=default)", flush=True)
+            return cap
+        cap.release()
+        return None
+
     def analyze_frame(self, frame: Any, annotate: bool = True) -> tuple[VisionState, Any]:
         """Analyze a single frame with tracking and color extraction."""
         height, width = frame.shape[:2]
         roi_pixels = self._roi_pixels(width, height)
 
         person_count = 0
-        phone_detected = False
         people_in_roi: list[Person] = []
-        best_phone: tuple[float, float, float, float, float] | None = None
 
         if annotate:
             self._draw_roi(frame, roi_pixels)
 
-        # Use track() with LOWEST confidence threshold to catch phones
-        # We'll manually filter people/phones with their respective thresholds after
-        min_conf = min(self.detection_confidence, self._phone_confidence)
+        # Use track() for people detection only
         results = self.model.track(
             frame,
             persist=True,
             verbose=False,
-            conf=min_conf,
+            conf=self.detection_confidence,
             iou=self._iou_threshold,
             imgsz=self._imgsz,
         )
@@ -306,62 +411,14 @@ class BondFireVision:
                         if inside:
                             label = f"ID:{tid} {self._tracked_people.get(tid, person).shirt_name if tid in self._tracked_people or inside else ''}"
                             cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                            
-                elif cls == self.CLASS_PHONE:
-                    if conf < self._phone_confidence:
-                        continue
-                    inside = self._is_inside_roi((x1, y1, x2, y2), roi_pixels)
-                    if inside:
-                        phone_detected = True
-                        if best_phone is None or conf > best_phone[0]:
-                            best_phone = (conf, x1, y1, x2, y2)
-                    if annotate:
-                        color = (0, 0, 255) if inside else (160, 160, 255)
-                        thickness = 2 if inside else 1
-                        cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
-                        label = f"PHONE ({conf:.2f})" if inside else "PHONE (out)"
-                        cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        if best_phone is not None:
-            _, x1, y1, x2, y2 = best_phone
-            cx = (x1 + x2) * 0.5
-            self._phone_x_history.append(cx)
-            self._phone_missing_frames = 0
-            self._phone_persistence_counter = 0  # Reset persistence when phone is detected
-        else:
-            self._phone_missing_frames += 1
-            self._phone_persistence_counter += 1  # Increment frames since last detection
-            if self._phone_missing_frames >= self._fanning_reset_missing:
-                self._phone_x_history.clear()
-        
-        # Apply persistence: if phone was recently seen, keep it detected for a few frames
-        if not phone_detected and self._phone_persistence_counter < self._phone_persistence_frames:
-            phone_detected = True  # Maintain detection through momentary occlusions
+        # Phone detection removed - using MQTT shake detection instead
 
-        movement = self._compute_fan_movement(self._phone_x_history)
-        if phone_detected and movement > self._fanning_threshold:
-            self._fan_power = min(100.0, self._fan_power + self._fanning_increase_step)
-        else:
-            self._fan_power *= self._fanning_decay
-        self._fan_power = max(0.0, min(100.0, self._fan_power))
-        
-        # Debounce phone detection - require consecutive frames for state change
-        if phone_detected:
-            self._phone_raw_detected_count += 1
-            self._phone_raw_missing_count = 0
-            if self._phone_raw_detected_count >= self._phone_debounce_detect:
-                self._phone_detected = True
-        else:
-            self._phone_raw_missing_count += 1
-            self._phone_raw_detected_count = 0
-            if self._phone_raw_missing_count >= self._phone_debounce_lose:
-                self._phone_detected = False
+        # Phone detection removed - using MQTT shake detection instead
 
-        # Update state machine with DEBOUNCED phone detection value
+        # Update state machine (no phone detection)
         context = StateContext(
             people_count=person_count,
-            phone_detected=self._phone_detected,
-            fan_power=self._fan_power,
             timestamp=time.monotonic(),
         )
         active_ids = {p.id for p in people_in_roi}
@@ -373,8 +430,7 @@ class BondFireVision:
         # Store people for packet building
         self._tracked_people = {p.id: p for p in people_in_roi}
 
-        # Use debounced phone detection for all outputs
-        state = VisionState(people_in_roi=person_count, phone_detected=self._phone_detected)
+        state = VisionState(people_in_roi=person_count)
 
         if annotate:
             self._draw_status(frame, state, state_output.state)
@@ -388,51 +444,37 @@ class BondFireVision:
 
     def _draw_status(self, frame, state: VisionState, current_state: State) -> None:
         """Draw status overlay on frame."""
-        # Show debounced status with counter info during transitions
-        if state.phone_detected:
-            # Already confirmed detected
-            if self._phone_raw_missing_count > 0:
-                # Losing detection, show countdown
-                phone_status = f"YES (losing {self._phone_raw_missing_count}/{self._phone_debounce_lose})"
-            elif self._phone_persistence_counter > 0:
-                # Persisting through occlusion
-                phone_status = f"YES (persist {self._phone_persistence_counter}/{self._phone_persistence_frames})"
-            else:
-                phone_status = "YES"
-        else:
-            # Currently not detected
-            if self._phone_raw_detected_count > 0:
-                # Building up detection, show count
-                phone_status = f"NO (detecting {self._phone_raw_detected_count}/{self._phone_debounce_detect})"
-            else:
-                phone_status = "NO"
-        
-        status_text = f"{current_state.value}: {state.people_in_roi} people | Phone: {phone_status}"
-        color = (0, 0, 255) if state.phone_detected else (0, 255, 0)
+        wind_value = self._get_wind_value(time.monotonic())
+        status_text = f"{current_state.value}: {state.people_in_roi} people | Wind: {wind_value}%"
+        color = (0, 255, 0)
         (text_w, _), _ = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
         cv2.rectangle(frame, (5, 5), (15 + text_w, 40), (0, 0, 0), -1)
         cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-        height, width = frame.shape[:2]
-        bar_w = int(width * 0.35)
-        bar_h = 18
-        x1 = 10
-        y1 = height - bar_h - 12
-        x2 = x1 + bar_w
-        y2 = y1 + bar_h
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (40, 40, 40), 2)
-        fill_w = int(bar_w * (max(0.0, min(100.0, self._fan_power)) / 100.0))
-        if fill_w > 2:
-            cv2.rectangle(frame, (x1 + 2, y1 + 2), (x1 + fill_w - 2, y2 - 2), (0, 140, 255), -1)
-        cv2.putText(
-            frame,
-            f"Wind: {self._fan_power:5.1f}%",
-            (x1, y1 - 6),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            2,
-        )
+        # Wind bar (shows MQTT shake-based wind value if enabled)
+        if self._shake_listener is not None:
+            wind_value = self._shake_listener.get_wind_value()
+            height, width = frame.shape[:2]
+            bar_w = int(width * 0.35)
+            bar_h = 18
+            x1 = 10
+            y1 = height - bar_h - 12
+            x2 = x1 + bar_w
+            y2 = y1 + bar_h
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (40, 40, 40), 2)
+            fill_w = int(bar_w * (max(0.0, min(100.0, wind_value)) / 100.0))
+            if fill_w > 2:
+                cv2.rectangle(frame, (x1 + 2, y1 + 2), (x1 + fill_w - 2, y2 - 2), (0, 140, 255), -1)
+            cv2.putText(
+                frame,
+                f"Wind: {wind_value:5.1f}%",
+                (x1, y1 - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (255, 255, 255),
+                2,
+            )
+
 
     def _is_inside_roi(self, box: tuple[float, float, float, float], roi_pixels: tuple[int, int, int, int]) -> bool:
         """Check if bounding box center is in ROI with expanded tolerance."""
@@ -476,7 +518,7 @@ class BondFireVision:
 
     def _send_update(self, sock: socket.socket, timestamp: float) -> None:
         """Build and send v2.1 packet."""
-        # Use cached state output from analyze_frame (preserves phone_just_exited flag)
+        # Use cached state output from analyze_frame
         if self._latest_state_output is None:
             return  # No frame analyzed yet
         
@@ -494,51 +536,8 @@ class BondFireVision:
         if len(people_colors) >= 2:
             colors_contrasting = are_colors_contrasting(people_colors[0], people_colors[1])
 
-        # Generate prompt
-        phone_flag = len(people) > 0 and any(p for p in people)  # Simplified
-        context = StateContext(
-            people_count=len(people),
-            phone_detected=self._phone_detected,
-            fan_power=self._fan_power,
-            timestamp=timestamp,
-        )
-        
-        # Debug: Log state output flags
-        if state_output.phone_just_exited:
-            print(f"📥 Detector received phone_just_exited=True", flush=True)
-        
-        # Handle phone exit celebration (time-based)
-        celebration_prompt = None
-        if state_output.phone_just_exited:
-            # Phone was just removed - celebrate for configured duration
-            # Clear any cached prompts so we don't show stale PHONE prompts after celebration
-            self.prompt_generator.force_regenerate()
-            self._celebration_prompt = self.prompt_generator.get_phone_exit_prompt()
-            celebration_prompt = self._celebration_prompt
-            self._celebration_until = timestamp + self._celebration_duration
-            print(f"🎉 CELEBRATION! Phone removed: '{celebration_prompt}'", flush=True)
-            if self.audio_manager:
-                self.audio_manager.play_sfx("party_horn", volume=0.7)
-        elif self._celebration_until is not None and timestamp < self._celebration_until:
-            celebration_prompt = self._celebration_prompt
-        else:
-            # Celebration ended, clear stored prompt
-            self._celebration_prompt = None
-            self._celebration_until = None
-        
-        phone_idle_delay_active = (
-            state_output.state == State.PHONE_IDLE
-            and self.state_machine.get_time_in_state(timestamp) < self._phone_idle_prompt_delay
-        )
-
-        # Use celebration prompt if in celebration mode, otherwise normal logic
-        if celebration_prompt is not None:
-            prompt = celebration_prompt
-        # Delay phone-idle prompts until the phone has been present long enough
-        elif phone_idle_delay_active:
-            prompt = ""
         # Handle entry flash and prompts
-        elif state_output.entry_flash_id:
+        if state_output.entry_flash_id:
             if (
                 self._entry_prompt_id != state_output.entry_flash_id
                 or self._entry_prompt_until is None
@@ -628,22 +627,21 @@ class BondFireVision:
             self._last_buildup_step = buildup_step
 
         # Build packet
-        is_celebrating = self._celebration_until is not None and timestamp < self._celebration_until
+        wind_value = self._get_wind_value(timestamp)
         packet = self.packet_builder.build(
             state=state_output.state,
             people=people,
-            phone_detected=context.phone_detected,
             dominant_palette=dominant_palette,
             prompt=prompt,
             mist_pwm=state_output.mist_pwm,
             fan_pwm=state_output.fan_pwm,
-            wind=int(round(self._fan_power)),
+            wind=wind_value,
             fire_intensity=state_output.fire_intensity,
             pulse_active=state_output.pulse_active,
             entry_flash_id=state_output.entry_flash_id,
             audio_state=audio_state,
             party_buildup_progress=state_output.party_buildup_progress,
-            celebration=is_celebrating,
+            celebration=False,  # Celebration removed
         )
 
         # Send packet
@@ -661,18 +659,60 @@ class BondFireVision:
             return AudioState.AMBIENT
         elif state == State.PARTY:
             return AudioState.PARTY
-        elif state in (State.PHONE_IDLE, State.FANNING):
-            return AudioState.AMBIENT
         return AudioState.SILENT
 
-    def _compute_fan_movement(self, x_history: deque[float]) -> float:
-        if len(x_history) < 2:
-            return 0.0
-        if self._fanning_metric == "std":
-            return float(pstdev(x_history))
-        total = 0.0
-        last = x_history[0]
-        for value in list(x_history)[1:]:
-            total += abs(value - last)
-            last = value
-        return total
+    def _get_wind_value(self, now: float) -> int:
+        if self._wind_udp_cfg.enabled:
+            with self._wind_udp_lock:
+                if now - self._wind_udp_last_update <= self._wind_udp_cfg.timeout:
+                    return self._wind_udp_value
+                if self._wind_udp_value > 0 and now - self._wind_udp_last_update <= 0.5:
+                    return self._wind_udp_value
+        return self._shake_listener.get_wind_value() if self._shake_listener else 0
+
+    def _wind_udp_listener(self, stop_event: threading.Event) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self._wind_udp_cfg.listen_host, self._wind_udp_cfg.listen_port))
+        sock.settimeout(0.5)
+        print(
+            f"Listening for wind UDP on {self._wind_udp_cfg.listen_host}:{self._wind_udp_cfg.listen_port}",
+            flush=True,
+        )
+
+        while not stop_event.is_set():
+            try:
+                data, _addr = sock.recvfrom(2048)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            wind_value = None
+            try:
+                payload = json.loads(data.decode("utf-8"))
+                if isinstance(payload, dict):
+                    wind_value = payload.get("wind")
+                else:
+                    wind_value = payload
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                try:
+                    wind_value = int(data.decode("utf-8").strip())
+                except (ValueError, UnicodeDecodeError):
+                    wind_value = None
+
+            if wind_value is None:
+                continue
+
+            try:
+                wind_value = int(float(wind_value))
+            except (TypeError, ValueError):
+                continue
+
+            wind_value = max(0, min(100, wind_value))
+            with self._wind_udp_lock:
+                self._wind_udp_value = wind_value
+                self._wind_udp_last_update = time.monotonic()
+            print(f"Received wind={wind_value}", flush=True)
+
+        sock.close()

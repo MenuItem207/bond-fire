@@ -12,8 +12,6 @@ import yaml
 class StateConfig:
     """State machine configuration."""
     fire_entry_dwell: float
-    phone_entry_dwell: float
-    phone_exit_dwell: float
     frame_rate: int
 
 
@@ -21,9 +19,7 @@ class StateConfig:
 class PromptsConfig:
     """Prompt generation configuration."""
     normal_cooldown: float
-    phone_cooldown: float
     same_state_cooldown: float
-    phone_idle_prompt_delay: float
 
 
 @dataclass
@@ -55,30 +51,32 @@ class AudioConfig:
 class VisionConfig:
     """Vision detection configuration."""
     confidence_threshold: float
-    phone_confidence_threshold: float
     person_class_id: int
-    phone_class_id: int
     min_person_area_ratio: float
     frame_width: int
     frame_height: int
     imgsz: int
     iou_threshold: float
-    phone_debounce_frames_detect: int
-    phone_debounce_frames_lose: int
-    phone_persistence_frames: int
 
 
 @dataclass
-class FanningConfig:
-    """Fanning detection configuration."""
-    history: int
-    metric: str
-    movement_threshold: float
-    decay: float
-    increase_step: float
-    reset_missing: int
-    power_threshold: float
-    power_hysteresis: float
+class FirebaseConfig:
+    """Firebase configuration for shake detection."""
+    enabled: bool
+    database_url: str
+    credentials_path: Optional[str]
+    wind_max: int
+    shake_timeout: float
+    max_concurrent_shakes: int
+
+
+@dataclass
+class WindUdpConfig:
+    """External wind input via UDP."""
+    enabled: bool
+    listen_host: str
+    listen_port: int
+    timeout: float
 
 
 @dataclass
@@ -97,7 +95,8 @@ class Config:
     celebration: CelebrationConfig
     audio: AudioConfig
     vision: VisionConfig
-    fanning: FanningConfig
+    firebase: FirebaseConfig
+    wind_udp: WindUdpConfig
     debug: DebugConfig
 
 
@@ -156,15 +155,11 @@ def _parse_config(data: dict) -> Config:
     return Config(
         state_machine=StateConfig(
             fire_entry_dwell=data["state_machine"].get("fire_entry_dwell", 0.0),
-            phone_entry_dwell=data["state_machine"]["phone_entry_dwell"],
-            phone_exit_dwell=data["state_machine"]["phone_exit_dwell"],
             frame_rate=data["state_machine"]["frame_rate"],
         ),
         prompts=PromptsConfig(
             normal_cooldown=data["prompts"]["normal_cooldown"],
-            phone_cooldown=data["prompts"]["phone_cooldown"],
             same_state_cooldown=data["prompts"].get("same_state_cooldown", data["prompts"]["normal_cooldown"] * 1.5),
-            phone_idle_prompt_delay=data["prompts"].get("phone_idle_prompt_delay", 2.0),
         ),
         celebration=CelebrationConfig(
             duration_frames=data["celebration"]["duration_frames"],
@@ -183,27 +178,26 @@ def _parse_config(data: dict) -> Config:
         ),
         vision=VisionConfig(
             confidence_threshold=data["vision"]["confidence_threshold"],
-            phone_confidence_threshold=data["vision"].get("phone_confidence_threshold", data["vision"]["confidence_threshold"] * 0.5),
             person_class_id=data["vision"]["person_class_id"],
-            phone_class_id=data["vision"]["phone_class_id"],
             min_person_area_ratio=data["vision"].get("min_person_area_ratio", 0.01),
             frame_width=data["vision"].get("frame_width", 1280),
             frame_height=data["vision"].get("frame_height", 720),
-            imgsz=data["vision"].get("imgsz", 1280),
+            imgsz=data["vision"].get("imgsz", 640),
             iou_threshold=data["vision"].get("iou_threshold", 0.45),
-            phone_debounce_frames_detect=data["vision"].get("phone_debounce_frames_detect", 2),
-            phone_debounce_frames_lose=data["vision"].get("phone_debounce_frames_lose", 3),
-            phone_persistence_frames=data["vision"].get("phone_persistence_frames", 8),
         ),
-        fanning=FanningConfig(
-            history=data.get("fanning", {}).get("history", 30),
-            metric=data.get("fanning", {}).get("metric", "distance"),
-            movement_threshold=data.get("fanning", {}).get("movement_threshold", 40.0),
-            decay=data.get("fanning", {}).get("decay", 0.95),
-            increase_step=data.get("fanning", {}).get("increase_step", 6.0),
-            reset_missing=data.get("fanning", {}).get("reset_missing", 10),
-            power_threshold=data.get("fanning", {}).get("power_threshold", 50.0),
-            power_hysteresis=data.get("fanning", {}).get("power_hysteresis", 5.0),
+        firebase=FirebaseConfig(
+            enabled=data.get("firebase", {}).get("enabled", True),
+            database_url=data.get("firebase", {}).get("database_url", "https://bondfire-app-d778f-default-rtdb.asia-southeast1.firebasedatabase.app"),
+            credentials_path=data.get("firebase", {}).get("credentials_path", None),
+            wind_max=data.get("firebase", {}).get("wind_max", 100),
+            shake_timeout=data.get("firebase", {}).get("shake_timeout", 2.0),
+            max_concurrent_shakes=data.get("firebase", {}).get("max_concurrent_shakes", 5),
+        ),
+        wind_udp=WindUdpConfig(
+            enabled=data.get("wind_udp", {}).get("enabled", True),
+            listen_host=data.get("wind_udp", {}).get("listen_host", "0.0.0.0"),
+            listen_port=data.get("wind_udp", {}).get("listen_port", 4211),
+            timeout=data.get("wind_udp", {}).get("timeout", 2.0),
         ),
         debug=DebugConfig(
             verbose_logging=data["debug"]["verbose_logging"],

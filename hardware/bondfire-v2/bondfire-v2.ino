@@ -57,14 +57,12 @@ DEFINE_GRADIENT_PALETTE(fire_orange_gp) {
 };
 
 
-// ===== SECTION 2: STATE MACHINE ENUMS & STRUCTS (NEW) =====
+// ===== SECTION 2: STATE MACHINE ENUMS & STRUCTS =====
 
 enum DisplayState {
   STATE_IDLE,
   STATE_FIRE,
-  STATE_PARTY,
-  STATE_PHONE_IDLE,
-  STATE_FANNING
+  STATE_PARTY
 };
 
 struct StateConfig {
@@ -303,10 +301,6 @@ void handlePacket() {
     currentStateConfig.state = STATE_FIRE;
   } else if (strcmp(stateStr, "PARTY") == 0) {
     currentStateConfig.state = STATE_PARTY;
-  } else if (strcmp(stateStr, "PHONE_IDLE") == 0) {
-    currentStateConfig.state = STATE_PHONE_IDLE;
-  } else if (strcmp(stateStr, "FANNING") == 0) {
-    currentStateConfig.state = STATE_FANNING;
   }
 
   // --- Parse PWM Values ---
@@ -428,12 +422,6 @@ void applyStateEffects() {
       case STATE_PARTY:
         colorTransitionTo = CRGB(255, 50, 255);  // Bright magenta
         break;
-      case STATE_PHONE_IDLE:
-        colorTransitionTo = CRGB(200, 120, 60); // Warm ember
-        break;
-      case STATE_FANNING:
-        colorTransitionTo = CRGB(255, 170, 80); // Brighter ember
-        break;
     }
     
     // Start color transition immediately (no delay, smooth 200ms blend)
@@ -453,12 +441,6 @@ void applyStateEffects() {
           break;
         case STATE_PARTY:
           newStateText = "PARTY!";
-          break;
-        case STATE_PHONE_IDLE:
-          newStateText = "Fan the flames";
-          break;
-        case STATE_FANNING:
-          newStateText = "Keep fanning";
           break;
       }
       if (newStateText != lastStateText) {
@@ -523,14 +505,9 @@ void renderStateEffects() {
     case STATE_PARTY:
       renderPartyEffect();
       break;
-
-    case STATE_PHONE_IDLE:
-    case STATE_FANNING:
-      renderFireEffect();
-      break;
   }
 
-  // Celebration overlay has highest priority
+  // Celebration overlay has highest priority (deprecated, kept for compatibility)
   if (millis() < celebrationUntil) {
     renderCelebrationEffect();
   } else if (millis() < entryFlashUntil) {
@@ -747,12 +724,6 @@ uint16_t getMatrixTextColor() {
       color = CHSV(hue, 255, 255);
       break;
     }
-    case STATE_PHONE_IDLE:
-      color = CRGB(200, 120, 60);
-      break;
-    case STATE_FANNING:
-      color = CRGB(255, 170, 80);
-      break;
   }
 
   // Subtle match to ring shade without introducing flicker.

@@ -1,0 +1,86 @@
+[debug] [2026-02-11T13:01:24.468Z] ----------------------------------------------------------------------
+[debug] [2026-02-11T13:01:24.469Z] Command:       /opt/homebrew/Cellar/node/24.5.0/bin/node /opt/homebrew/bin/firebase init
+[debug] [2026-02-11T13:01:24.469Z] CLI Version:   14.23.0
+[debug] [2026-02-11T13:01:24.469Z] Platform:      darwin
+[debug] [2026-02-11T13:01:24.469Z] Node Version:  v24.5.0
+[debug] [2026-02-11T13:01:24.470Z] Time:          Wed Feb 11 2026 21:01:24 GMT+0800 (Singapore Standard Time)
+[debug] [2026-02-11T13:01:24.470Z] ----------------------------------------------------------------------
+[debug] 
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  /Users/emmanuel/Documents/Dev/Projects/bond-fire
+
+Before we get started, keep in mind:
+
+  * You are initializing within an existing Firebase project directory
+
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[debug] [2026-02-11T13:01:27.681Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-11T13:01:27.681Z] > authorizing via signed-in user (emmanuelchew7@gmail.com)
+[debug] [2026-02-11T13:01:27.681Z] Checked if tokens are valid: true, expires at: 1770818454712
+[debug] [2026-02-11T13:01:27.681Z] Checked if tokens are valid: true, expires at: 1770818454712
+[debug] [2026-02-11T13:01:27.682Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/bondfire-app [none]
+[debug] [2026-02-11T13:01:28.179Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/bondfire-app 403
+[debug] [2026-02-11T13:01:28.179Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/bondfire-app {"error":{"code":403,"message":"The caller does not have permission","status":"PERMISSION_DENIED"}}
+[debug] [2026-02-11T13:01:28.179Z] Request to https://firebase.googleapis.com/v1beta1/projects/bondfire-app had HTTP Error: 403, The caller does not have permission
+[debug] [2026-02-11T13:01:28.180Z] FirebaseError: Request to https://firebase.googleapis.com/v1beta1/projects/bondfire-app had HTTP Error: 403, The caller does not have permission
+    at responseToError (/opt/homebrew/lib/node_modules/firebase-tools/lib/responseToError.js:53:12)
+    at RetryOperation._fn (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:322:77)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+[error] 
+[error] Error: Failed to get Firebase project bondfire-app. Please make sure the project exists and your account has permission to access it.
+[debug] [2026-02-11T13:01:36.751Z] ----------------------------------------------------------------------
+[debug] [2026-02-11T13:01:36.753Z] Command:       /opt/homebrew/Cellar/node/24.5.0/bin/node /opt/homebrew/bin/firebase init
+[debug] [2026-02-11T13:01:36.753Z] CLI Version:   14.23.0
+[debug] [2026-02-11T13:01:36.753Z] Platform:      darwin
+[debug] [2026-02-11T13:01:36.753Z] Node Version:  v24.5.0
+[debug] [2026-02-11T13:01:36.753Z] Time:          Wed Feb 11 2026 21:01:36 GMT+0800 (Singapore Standard Time)
+[debug] [2026-02-11T13:01:36.753Z] ----------------------------------------------------------------------
+[debug] 
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  /Users/emmanuel/Documents/Dev/Projects/bond-fire
+
+Before we get started, keep in mind:
+
+  * You are initializing within an existing Firebase project directory
+
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[debug] [2026-02-11T13:01:41.656Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-11T13:01:41.656Z] > authorizing via signed-in user (emmanuelchew7@gmail.com)
+[debug] [2026-02-11T13:01:41.656Z] Checked if tokens are valid: true, expires at: 1770818454712
+[debug] [2026-02-11T13:01:41.657Z] Checked if tokens are valid: true, expires at: 1770818454712
+[debug] [2026-02-11T13:01:41.657Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/bondfire-app [none]
+[debug] [2026-02-11T13:01:42.390Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/bondfire-app 403
+[debug] [2026-02-11T13:01:42.390Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/bondfire-app {"error":{"code":403,"message":"The caller does not have permission","status":"PERMISSION_DENIED"}}
+[debug] [2026-02-11T13:01:42.390Z] Request to https://firebase.googleapis.com/v1beta1/projects/bondfire-app had HTTP Error: 403, The caller does not have permission
+[debug] [2026-02-11T13:01:42.390Z] FirebaseError: Request to https://firebase.googleapis.com/v1beta1/projects/bondfire-app had HTTP Error: 403, The caller does not have permission
+    at responseToError (/opt/homebrew/lib/node_modules/firebase-tools/lib/responseToError.js:53:12)
+    at RetryOperation._fn (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:322:77)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+[error] 
+[error] Error: Failed to get Firebase project bondfire-app. Please make sure the project exists and your account has permission to access it.

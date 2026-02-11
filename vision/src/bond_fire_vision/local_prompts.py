@@ -85,26 +85,6 @@ class LocalPromptGenerator:
         "Full house! Don't break the chain.",
     ]
 
-    PHONE_IDLE_PROMPTS = [
-        "The fire is dying... Fan it with your phone!",
-        "(hint: works better with more phones)",
-        "I see a phone... try fanning the flames!",
-    ]
-
-    FANNING_PROMPTS = [
-        "WHOA! Keep it going!",
-        "Feeding the fire!",
-    ]
-
-    PHONE_EXIT_PROMPTS = [
-        "Welcome back to reality.",
-        "Nice eyes. Thanks for using them.",
-        "Humanity restored. Good job.",
-        "See? Real life not so bad.",
-        "Offline looks good on you.",
-        "Notification cleared. Vibe resumed.",
-    ]
-
     # Color-aware prompts (when multiple people have distinct colors)
     COLOR_PROMPTS = [
         "Wah, this palette is expensive.",
@@ -126,15 +106,12 @@ class LocalPromptGenerator:
         self._history: deque[str] = deque(maxlen=history_size)
         self._color_prompt_enabled = False
         
-        # Load cooldown timings from config if not provided
+        # Load cooldown timing from config if not provided
         if prompt_cooldown is None:
             cfg = get_config()
             self._prompt_cooldown = cfg.prompts.normal_cooldown
-            self._phone_cooldown = cfg.prompts.phone_cooldown
         else:
             self._prompt_cooldown = prompt_cooldown
-            cfg = get_config()
-            self._phone_cooldown = cfg.prompts.phone_cooldown
         
         self._current_prompt: Optional[str] = None
         self._last_prompt_time: float = 0.0
@@ -161,10 +138,7 @@ class LocalPromptGenerator:
         """
         # Check cooldown timer
         now = time.monotonic()
-        # Use shorter cooldown for phone-driven states
-        active_cooldown = (
-            self._phone_cooldown if state in (State.PHONE_IDLE, State.FANNING) else self._prompt_cooldown
-        )
+        active_cooldown = self._prompt_cooldown
         if cooldown_override is not None:
             active_cooldown = max(active_cooldown, cooldown_override)
         if (self._current_prompt is not None and 
@@ -174,10 +148,6 @@ class LocalPromptGenerator:
         # Select prompt pool based on state
         if state == State.IDLE:
             pool = self.IDLE_PROMPTS
-        elif state == State.PHONE_IDLE:
-            pool = self.PHONE_IDLE_PROMPTS
-        elif state == State.FANNING:
-            pool = self.FANNING_PROMPTS
         elif state == State.PARTY:
             pool = self.PARTY_PROMPTS
         elif state == State.FIRE:
@@ -231,9 +201,7 @@ class LocalPromptGenerator:
         if self._current_prompt is None:
             return False
         now = time.monotonic()
-        active_cooldown = (
-            self._phone_cooldown if state in (State.PHONE_IDLE, State.FANNING) else self._prompt_cooldown
-        )
+        active_cooldown = self._prompt_cooldown
         if cooldown_override is not None:
             active_cooldown = max(active_cooldown, cooldown_override)
         return (now - self._last_prompt_time) < active_cooldown
@@ -264,15 +232,6 @@ class LocalPromptGenerator:
             ]
 
         return random.choice(prompts)
-
-    def get_phone_exit_prompt(self) -> str:
-        """
-        Generate a celebratory prompt when phone is put away.
-
-        Returns:
-            Celebration prompt string
-        """
-        return random.choice(self.PHONE_EXIT_PROMPTS)
 
     def get_pulse_prompt(self, color_names: list[str]) -> str:
         """

@@ -556,10 +556,6 @@ class BondFireProjection(mglw.WindowConfig):
                     float party = smoothstep(0.0, 1.0, u_party) *
                                   (0.5 + 0.5 * cos((delta.x * 12.0 + delta.y * 12.0) + u_time * 4.0));
 
-                    float phone_prev = u_state_prev == 3 ? 1.0 : 0.0;
-                    float phone_curr = u_state == 3 ? 1.0 : 0.0;
-                    float phone_weight = mix(phone_prev, phone_curr, u_state_blend);
-
                     float celebration = smoothstep(0.0, 1.0, u_celebration) *
                                         (0.6 + 0.4 * sin(u_time * 12.0));
 
@@ -579,16 +575,12 @@ class BondFireProjection(mglw.WindowConfig):
                     flicker_mix = smoothstep(0.2, 0.95, flicker_mix);
 
                     float gain_prev = 1.0;
-                    if (u_state_prev == 3 || u_state_prev == 4) {
-                        gain_prev = 1.0;
-                    } else if (u_state_prev == 2) {
+                    if (u_state_prev == 2) {
                         gain_prev = 1.25;
                     }
 
                     float gain_curr = 1.0;
-                    if (u_state == 3 || u_state == 4) {
-                        gain_curr = 1.0;
-                    } else if (u_state == 2) {
+                    if (u_state == 2) {
                         gain_curr = 1.25;
                     }
 
@@ -629,7 +621,6 @@ class BondFireProjection(mglw.WindowConfig):
                     color += party_color * ring * 0.7 * party_weight;
                     color += party_color * ring_glow * 0.4 * party_weight;
 
-                    float phone_spark = 0.0;
                     color += ember * (0.2 + 0.4 * swirl) * base;
                     color += ember * embers * 0.65;
                     color += u_palette[2] * pulse * 0.6;
@@ -855,6 +846,9 @@ class BondFireProjection(mglw.WindowConfig):
         wind_boost = float(state_snapshot.wind) / 100.0
         if wind_boost > 0.05:  # Only boost when actively fanning
             render_fire = render_fire * (1.0 + wind_boost * 0.8)
+
+        # Step fire size/brightness by state (IDLE=0, FIRE=1, PARTY=2)
+        render_fire = render_fire * (1.0 + 0.2 * state_index)
         
         baseline_fire = float(self._visuals.get("baseline_fire", 0.35))
         if not math.isfinite(baseline_fire) or baseline_fire <= 0.0:
@@ -925,9 +919,6 @@ class BondFireProjection(mglw.WindowConfig):
             "IDLE": 0,
             "FIRE": 1,
             "PARTY": 2,
-            "PHONE": 3,
-            "PHONE_IDLE": 3,
-            "FANNING": 3,
         }
         return mapping.get(state.upper(), 0)
 

@@ -1,19 +1,15 @@
 # Bond Fire Vision Configuration
 # Adjust these values without modifying code
 
-# State Machine - Phone Detection Thresholds (seconds)
+# State Machine - Thresholds (seconds)
 state_machine:
   fire_entry_dwell: 0.3       # Debounce IDLE -> FIRE to avoid single-frame flicker
-  phone_entry_dwell: 0.5      # Debounce PHONE entry to reduce false positives
-  phone_exit_dwell: 0.5       # Hysteresis - phone must be absent for this duration to exit PHONE state
   frame_rate: 5               # FPS for celebration display and state timing
 
 # Prompt Generation - Cooldown Durations (seconds)
 prompts:
   normal_cooldown: 22         # Minimum time between prompts in non-phone states
-  phone_cooldown: 22          # Minimum time between prompts while phone is detected
   same_state_cooldown: 22     # Minimum time between prompts when state is unchanged
-  phone_idle_prompt_delay: 2  # Seconds to wait before showing phone-idle prompts
   
 # Celebration Effect - Phone Exit Celebration
 celebration:
@@ -42,29 +38,29 @@ audio:
 
 # Vision Detection
 vision:
-  confidence_threshold: 0.08  # YOLO detection confidence for people (0.0 to 1.0) - lower = more sensitive
-  phone_confidence_threshold: 0.08  # Very low threshold for phones (smaller, harder to detect)
+  confidence_threshold: 0.08  # YOLO detection confidence for people (0.0 to 1.0)
   person_class_id: 0          # COCO dataset person class
-  phone_class_id: 67          # COCO dataset cell phone class
-  min_person_area_ratio: 0.08 # Min person bbox area as fraction of frame area (lowered for distant people)
+  min_person_area_ratio: 0.08 # Min person bbox area as fraction of frame area
   frame_width: 1920           # Camera capture width
   frame_height: 1080          # Camera capture height
-  imgsz: 1920                 # YOLO inference size (match frame width for no downscaling)
-  iou_threshold: 0.45         # NMS IOU threshold (lower = more strict, less overlap)
-  phone_debounce_frames_detect: 2  # Consecutive frames required to confirm phone presence
-  phone_debounce_frames_lose: 3    # Consecutive frames required to confirm phone absence
-  phone_persistence_frames: 8      # Keep phone detected for this many frames after last seen
+  imgsz: 640                  # YOLO inference size (smaller = faster)
+  iou_threshold: 0.45         # NMS IOU threshold
 
-# Fanning Detection (Digital Bellows)
-fanning:
-  history: 30                 # Number of phone x-positions to keep
-  metric: distance            # distance or std
-  movement_threshold: 28.0    # Movement threshold for fanning detection
-  decay: 0.88                 # Fan power decay per frame when not fanning (lower = faster deflation)
-  increase_step: 12.0         # Fan power increase per frame when fanning (increased for immediate response)
-  reset_missing: 10           # Frames until history reset when phone missing
-  power_threshold: 50.0       # Fan power threshold for FANNING state
-  power_hysteresis: 5.0       # Prevents rapid flip-flopping around threshold
+# Firebase Integration - Web App Shake Detection
+firebase:
+  enabled: false
+  database_url: https://bondfire-app-d778f-default-rtdb.asia-southeast1.firebasedatabase.app
+  credentials_path: null          # Optional path to Firebase service account JSON
+  wind_max: 100                   # Max wind value (0-100)
+  shake_timeout: 2.0              # Seconds before shake expires
+  max_concurrent_shakes: 5        # Max unique shake events to count per second
+
+# External wind input (from RTDB bridge)
+wind_udp:
+  enabled: true
+  listen_host: 0.0.0.0
+  listen_port: 4211
+  timeout: 2.0
 
 # Development/Debugging
 debug:
