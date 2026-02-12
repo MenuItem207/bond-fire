@@ -12,7 +12,7 @@ mapping:
 text:
   enabled: true
   font: "Arial"
-  font_size: 32
+  font_size: 44
   max_chars: 90
   position: [0.50, 0.50]
   color: [255, 236, 210]
