@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import math
+import random
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 import sys
@@ -386,6 +388,21 @@ class BondFireProjection(mglw.WindowConfig):
 
         self._calibration = False
         self._selected_corner = 0
+        self._wind_prompts = [
+            "Keep feeding my flames.",
+            "More wind. More glow.",
+            "Don't stop. Stoke me harder.",
+            "Fan the fire. Feed the heat.",
+            "That wind hits different.",
+            "Fuel me. Keep it coming.",
+        ]
+        self._wind_prompt_until = 0.0
+        self._wind_prompt_cooldown_until = 0.0
+        self._active_wind_prompt: Optional[str] = None
+        self._last_packet_prompt = ""
+        self._wind_prompt_min = int(self._visuals.get("wind_prompt_min", 25))
+        self._wind_prompt_hold_sec = float(self._visuals.get("wind_prompt_hold_sec", 2.5))
+        self._wind_prompt_cooldown_sec = float(self._visuals.get("wind_prompt_cooldown_sec", 4.0))
 
     def close(self) -> None:
         if self._listener:
@@ -715,6 +732,23 @@ class BondFireProjection(mglw.WindowConfig):
     def _on_packet(self, packet: dict) -> None:
         with self._lock:
             self._state.update_from_packet(packet)
+            if "prompt" in packet:
+                self._last_packet_prompt = str(packet.get("prompt", ""))
+
+            wind_value = int(packet.get("wind", self._state.wind))
+            now = time.monotonic()
+            if wind_value >= self._wind_prompt_min:
+                if now >= self._wind_prompt_until and now >= self._wind_prompt_cooldown_until:
+                    self._active_wind_prompt = random.choice(self._wind_prompts)
+                    self._wind_prompt_until = now + self._wind_prompt_hold_sec
+                    self._wind_prompt_cooldown_until = now + self._wind_prompt_cooldown_sec
+                if self._active_wind_prompt:
+                    self._state.prompt = self._active_wind_prompt
+            else:
+                if now < self._wind_prompt_until and self._active_wind_prompt:
+                    self._state.prompt = self._active_wind_prompt
+                elif self._last_packet_prompt:
+                    self._state.prompt = self._last_packet_prompt
 
     @staticmethod
     def _smooth_value(current: float, target: float, dt: float, tau: float) -> float:
@@ -842,7 +876,7 @@ class BondFireProjection(mglw.WindowConfig):
         wind_boost = float(state_snapshot.wind) / 100.0
         wind_boost = clamp(wind_boost, 0.0, 1.0)
         if wind_boost > 0.05:  # Only boost when wind is active
-            render_fire = render_fire * (1.0 + wind_boost * 1.1)
+            render_fire = render_fire * (1.0 + wind_boost * 1.6)
 
         # Step fire size/brightness by state (IDLE=0, FIRE=1, PARTY=2)
         render_fire = render_fire * (1.0 + 0.2 * state_index)
@@ -855,12 +889,12 @@ class BondFireProjection(mglw.WindowConfig):
         self._set_uniform(prog, "u_fire", render_fire)
         self._set_uniform(prog, "u_pulse", 1.0 if state_snapshot.pulse_active else 0.0)
         self._set_uniform(prog, "u_pulse_speed", float(self._visuals.get("pulse_speed", 2.4)))
-        pulse_strength = float(self._visuals.get("pulse_strength", 0.8)) * (1.0 + wind_boost * 0.6)
+        pulse_strength = float(self._visuals.get("pulse_strength", 0.8)) * (1.0 + wind_boost * 1.25)
         self._set_uniform(prog, "u_pulse_strength", pulse_strength)
         self._set_uniform(prog, "u_force_pulse", 1.0 if self._visuals.get("always_pulse", True) else 0.0)
         self._set_uniform(prog, "u_party", float(state_snapshot.party_buildup_progress))
         ring_floor = float(self._visuals.get("ring_floor", 0.35))
-        ring_floor = clamp(ring_floor + wind_boost * float(self._visuals.get("wind_ring_boost", 0.35)), 0.0, 1.5)
+        ring_floor = clamp(ring_floor + wind_boost * float(self._visuals.get("wind_ring_boost", 0.65)), 0.0, 2.0)
         self._set_uniform(prog, "u_ring_floor", ring_floor)
         text_mode = 1 if str(text_cfg.get("mode", "linear")) == "circular" else 0
         ring_offset = float(text_cfg.get("ring_offset", 0.06))
