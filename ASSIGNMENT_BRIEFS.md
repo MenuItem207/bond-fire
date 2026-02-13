@@ -2,30 +2,28 @@
 
 ## Project Context (Read First)
 
-**Product:** The Empathic Hearth, an interactive installation that uses computer vision to detect people and phones, then drives a mist-flame, fan, LED ring, and LED matrix to encourage social connection.
+**Product:** The Empathic Hearth, an interactive installation that uses computer vision to detect people and drive a mist-flame, fan, LED ring, and LED matrix to encourage social connection.
 
-**Architecture Summary:** A Python "master" runs YOLOv8 vision, a state machine, and an audio system. It broadcasts a v2.1 JSON packet over WiFi UDP (port 4210) ~30 packets/sec to an ESP32 "slave". The ESP32 parses packets and renders visual effects while controlling PWM outputs for mist and fan. A phone hotspot bridges the Mac and ESP32. The system is designed as a social feedback loop: people count and phone detection alter visual effects, mist/fan intensity, and prompts.
+**Architecture Summary:** A Python "master" runs YOLOv8 vision, a state machine, and an audio system. It broadcasts a v2.1 JSON packet over WiFi UDP (port 4210) ~30 packets/sec to an ESP32 "slave". The ESP32 parses packets and renders visual effects while controlling PWM outputs for mist and fan. A phone hotspot bridges the Mac and ESP32. The system is designed as a social feedback loop: people count and wind/shake input alter visual effects, mist/fan intensity, and prompts.
 
 **Standalone Reference (No Repo Access Needed):**
-- **Master (Python):** YOLOv8 detects people and phones, tracks IDs, extracts dominant shirt colors, runs a state machine, builds a JSON packet, and sends UDP broadcast at ~30 packets/sec.
+- **Master (Python):** YOLOv8 detects people, tracks IDs, extracts dominant shirt colors, runs a state machine, builds a JSON packet, and sends UDP broadcast at ~30 packets/sec. Wind is sourced from Firebase RTDB shake input or a secondary UDP listener.
 - **Slave (ESP32):** Receives UDP, parses JSON, and renders LED ring + LED matrix while driving mist and fan via PWM.
 - **UDP Port:** 4210. **Packet size goal:** under 1 KB. **ESP32 buffer:** 1500 bytes.
-- **Core States:** IDLE, FIRE, PARTY, PHONE.
-	- IDLE: 0 people.
-	- FIRE: 1-4 people.
+- **Core States:** IDLE, FIRE, PARTY.
+	- IDLE: 0 people for 5 seconds.
+	- FIRE: 1-4 people (after a short entry dwell).
 	- PARTY: 5+ people for 2 seconds.
-	- PHONE: Any phone detected; preempts other states.
 	- Exit PARTY: <4 people for 3 seconds.
-	- Phone exit hysteresis: 0.5 seconds.
-- **State Outputs (Master to Slave):** `mist_pwm` (0-255), `fan_pwm` (0-255), `fire_intensity` (0.0-1.0), `pulse_active` (15s pulse), `entry_flash_id` (new person), `party_buildup_progress` (0.0-1.0), `celebration` (phone exit celebration).
+- **State Outputs (Master to Slave):** `mist_pwm` (0-255), `fan_pwm` (0-255), `wind` (0-100), `fire_intensity` (0.0-1.0), `pulse_active` (15s pulse), `entry_flash_id` (new person), `party_buildup_progress` (0.0-1.0).
 - **Protocol Fields (v2.1 JSON):**
 	- `version` (2)
-	- `state` (IDLE/FIRE/PARTY/PHONE)
+	- `state` (IDLE/FIRE/PARTY)
 	- `people` (array, max 6)
 	- `dominant_palette` (up to 4 colors, 12 values total)
 	- `prompt` (max 120 chars)
-	- `mist_pwm`, `fan_pwm`, `fire_intensity`
-	- `pulse_active`, `entry_flash_id`, `party_buildup_progress`, `celebration`
+	- `mist_pwm`, `fan_pwm`, `wind`, `fire_intensity`
+	- `pulse_active`, `entry_flash_id`, `party_buildup_progress`, `audio_state`, `timestamp`, `fps`
 - **Hardware Outputs:**
 	- Mist PWM: 1 kHz, 8-bit. Safe floor 150, idle 220, max 255.
 	- Fan PWM: 5 kHz, 8-bit. Idle 60, min 100, max 255.
@@ -33,12 +31,13 @@
 	- LED matrix: 32x8 NeoMatrix.
 - **Watchdog:** 5-second timeout safety fallback on ESP32.
 - **Vision Config (Default):**
-	- Detection confidence threshold: 0.5
-	- Person class ID: 0, phone class ID: 67 (COCO)
-	- Fire entry dwell: 0.3s, phone entry dwell: 0.5s, phone exit dwell: 0.5s
+	- Detection confidence threshold: 0.08
+	- Person class ID: 0 (COCO)
+	- Minimum person area ratio: 0.08
+	- NMS IOU threshold: 0.45
+	- Fire entry dwell: 0.3s
 	- Frame rate for state timing: 5 fps
-	- Prompt cooldowns: 22s (normal, phone, same-state)
-	- Celebration duration: 10 frames (~2 seconds at 5 fps)
+	- Prompt cooldowns: 22s (normal, same-state)
 - **Audio:** SFX and music playback; optional TTS narration; audio queue size 50.
 
 **Embedded Code Snippets (For Standalone Use):**
@@ -87,22 +86,17 @@ FAN_MAX = 255
 ```yaml
 state_machine:
 	fire_entry_dwell: 0.3
-	phone_entry_dwell: 0.5
-	phone_exit_dwell: 0.5
 	frame_rate: 5
 
 prompts:
 	normal_cooldown: 22
-	phone_cooldown: 22
 	same_state_cooldown: 22
 
-celebration:
-	duration_frames: 10
-
 vision:
-	confidence_threshold: 0.5
+	confidence_threshold: 0.08
 	person_class_id: 0
-	phone_class_id: 67
+	min_person_area_ratio: 0.08
+	iou_threshold: 0.45
 ```
 
 **Packet schema builder (v2.1 JSON fields):**
@@ -111,19 +105,18 @@ packet = {
 	"version": 2,
 	"timestamp": now,
 	"fps": round(avg_fps, 1),
-	"state": state.value,              # IDLE/FIRE/PARTY/PHONE
+	"state": state.value,              # IDLE/FIRE/PARTY
 	"people": people_data,             # max 6
-	"phone_detected": phone_detected,
 	"dominant_palette": palette,       # max 4 colors
 	"prompt": prompt[:120],
 	"mist_pwm": mist_pwm,
 	"fan_pwm": fan_pwm,
+	"wind": wind,
 	"fire_intensity": round(fire_intensity, 2),
 	"pulse_active": pulse_active,
 	"entry_flash_id": entry_flash_id,
 	"audio_state": audio_state.value,
 	"party_buildup_progress": round(party_buildup_progress, 2),
-	"celebration": celebration,
 }
 ```
 
@@ -135,12 +128,10 @@ char packetBuffer[1500]; // buffer for v2.1 packets
 ```
 
 **State transition logic (concise summary):**
-- PHONE has highest priority and preempts any other state.
 - IDLE enters after 5 seconds of zero people.
 - FIRE enters after fire_entry_dwell when people > 0.
 - PARTY enters after 5+ people for 2 seconds, with a 1.5 second build-up.
 - PARTY exits when people <= 4 for 3 seconds.
-- PHONE exits after phone_exit_dwell when the phone is no longer detected; triggers a short celebration effect.
 
 **Key Files (If You Have Repo Access):**
 - project overview and system diagram: [project-readme.md](project-readme.md)
@@ -149,9 +140,9 @@ char packetBuffer[1500]; // buffer for v2.1 packets
 - Python packet builder: [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py)
 - Configuration values: [vision/config.yaml](vision/config.yaml)
 
-**Core States:** IDLE, FIRE, PARTY, PHONE. Phone state preempts others; party requires 5+ people for 2s; exit party when <4 people for 3s. Timings are configurable in [vision/config.yaml](vision/config.yaml).
+**Core States:** IDLE, FIRE, PARTY. Party requires 5+ people for 2s; exit party when <4 people for 3s. Timings are configurable in [vision/config.yaml](vision/config.yaml).
 
-**State Outputs (Master to Slave):** The state machine produces `mist_pwm`, `fan_pwm`, `fire_intensity` (0.0 to 1.0), `pulse_active` (15s pulse), `entry_flash_id` (new person), and `party_buildup_progress` (0.0 to 1.0). These are serialized into the v2.1 UDP packet along with `state`, `people`, `dominant_palette`, and `prompt`.
+**State Outputs (Master to Slave):** The state machine produces `mist_pwm`, `fan_pwm`, `fire_intensity` (0.0 to 1.0), `pulse_active` (15s pulse), `entry_flash_id` (new person), and `party_buildup_progress` (0.0 to 1.0). Wind input (0-100) is sourced externally and included in the v2.1 packet along with `state`, `people`, `dominant_palette`, and `prompt`.
 
 **Hardware Outputs (ESP32):**
 - Mist atomizer PWM (1 kHz, 8-bit)
@@ -166,6 +157,7 @@ char packetBuffer[1500]; // buffer for v2.1 packets
 - `people` list truncated to 6
 - `prompt` truncated to 120 chars
 - `dominant_palette` max 4 colors (12 values)
+- `wind` clamped to 0-100 and quantized to 25-step buckets
 
 **Audio Context:** The master can play SFX/music and optional TTS narration; audio state is embedded in packets for synchronized cues (e.g., AMBIENT vs PARTY).
 
@@ -192,12 +184,12 @@ char packetBuffer[1500]; // buffer for v2.1 packets
 - Draw a hardware signal flow diagram from UDP payload fields (`mist_pwm`, `fan_pwm`, `dominant_palette`) into PWM outputs and LED ring/matrix render paths, including safety clamps and the watchdog timeout.
 
 **Required Deliverables:**
-- Map each core state (IDLE/FIRE/PARTY/PHONE) to LED ring effects, matrix text behavior, and mist/fan PWM range assumptions.
-- Describe how `pulse_active`, `entry_flash_id`, and `party_buildup_progress` alter the base effect.
+- Map each core state (IDLE/FIRE/PARTY) to LED ring effects, matrix text behavior, and mist/fan PWM range assumptions.
+- Describe how `pulse_active`, `entry_flash_id`, `party_buildup_progress`, and `wind` alter the base effect.
 - Provide a risk/safety section addressing PWM floors, watchdog timeout behavior, and thermal or moisture considerations.
 
 **Distinction Checklist:**
-- Write this sentence verbatim: “The ESP32 effect engine consumes the v2.1 UDP fields from `PacketBuilderV2.build()` and applies them to PWM outputs and LED renderers, ensuring protocol-driven lighting and actuation stay synchronized with the vision state machine.” [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py#L55-L150)
+- Write this sentence verbatim: “The ESP32 effect engine consumes the v2.1 UDP fields from `PacketBuilderV2.build()` and applies state, PWM, palette, and wind inputs to its LED renderers and actuation outputs, ensuring protocol-driven lighting stays synchronized with the vision state machine.” [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py#L55-L150)
 
 ---
 
@@ -210,39 +202,40 @@ char packetBuffer[1500]; // buffer for v2.1 packets
 **Required Specs (Extrapolate from Code):**
 - Protocol version `PROTOCOL_VERSION=2` and schema v2.1; max packet size < 1 KB [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py#L39-L48)
 - Max people array length = 6 and prompt length = 120 chars [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py#L110-L127)
+- Wind clamped to 0-100 and quantized to 25-step buckets [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py#L118-L124)
 - UDP port 4210 and packet buffer size 1500 bytes [hardware/bondfire-v2/bondfire-v2.ino](hardware/bondfire-v2/bondfire-v2.ino#L29-L33), [hardware/bondfire-v2/bondfire-v2.ino](hardware/bondfire-v2/bondfire-v2.ino#L83-L85)
 
 **Diagram Instruction:**
 - Draw a sequence diagram: `PacketBuilderV2.build()` → UDP broadcast → ESP32 UDP listener → JSON parse → state dispatch → PWM/LED outputs.
 
 **Required Deliverables:**
-- List every packet field used by the ESP32 (state, mist/fan PWM, palette, pulse, entry flash, celebration) and describe expected data types and ranges.
+- List every packet field used by the ESP32 (state, mist/fan PWM, wind, fire_intensity, palette, pulse, entry flash, prompt, and people for entry flash lookup) and describe expected data types and ranges.
 - Define a validation policy (what to do if a field is missing, malformed, or out of range).
 - Include a short section on packet-size budgeting and why truncation limits exist.
 
 **Distinction Checklist:**
-- Write this sentence verbatim: “The schema constraints (people ≤ 6, prompt ≤ 120, palette ≤ 4 colors) are enforced in the packet builder and must be revalidated on the ESP32 to keep the master’s state machine and slave’s effect renderer in lockstep.” [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py#L110-L132)
+- Write this sentence verbatim: “The schema constraints (people ≤ 6, prompt ≤ 120, palette ≤ 4 colors, wind 0-100) are enforced in the packet builder and must be revalidated on the ESP32 to keep the master’s state machine and slave’s effect renderer in lockstep.” [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py#L110-L132)
 
 ---
 
 ## MEMBER 3 (Option A): Vision State Machine and Behavior Logic
 
-**Topic:** Vision-driven state machine (IDLE/FIRE/PARTY/PHONE) and behavior timings.
+**Topic:** Vision-driven state machine (IDLE/FIRE/PARTY) and behavior timings.
 
 **Focus:** Explain the state transitions, dwell timers, and how output values map to PWM and effects.
 
 **Required Specs (Extrapolate from Code):**
 - Party entry/exit dwell: 2.0 s entry, 3.0 s exit; pulse interval 15 s [vision/src/bond_fire_vision/state_machine.py](vision/src/bond_fire_vision/state_machine.py#L61-L67)
-- Fire/phone dwell from config: `fire_entry_dwell=0.3`, `phone_entry_dwell=0.5`, `phone_exit_dwell=0.5`, `frame_rate=5` [vision/config.yaml](vision/config.yaml#L5-L9)
+- Fire entry dwell and frame rate from config: `fire_entry_dwell=0.3`, `frame_rate=5` [vision/config.yaml](vision/config.yaml#L5-L8)
 - Hardware output bounds: `MIST_MIN=150`, `MIST_MAX=255`, `FAN_MIN=100`, `FAN_MAX=255` [vision/src/bond_fire_vision/state_machine.py](vision/src/bond_fire_vision/state_machine.py#L69-L75)
 
 **Diagram Instruction:**
-- Draw a state transition diagram with explicit dwell timers for IDLE, FIRE, PARTY, and PHONE, and annotate output effects (`mist_pwm`, `fan_pwm`, `pulse_active`).
+- Draw a state transition diagram with explicit dwell timers for IDLE, FIRE, and PARTY, and annotate output effects (`mist_pwm`, `fan_pwm`, `pulse_active`).
 
 **Required Deliverables:**
 - A timing table summarizing all dwell timers and their triggers (from config and code).
 - A mapping from state outputs to packet fields, describing how each output influences the slave's effects.
-- A narrative of the phone preemption logic and the phone exit celebration trigger.
+- A narrative of party build-up progression and entry flash behavior.
 
 **Distinction Checklist:**
 - Write this sentence verbatim: “The state machine’s dwell timers from config drive output PWM and effect flags that are serialized into UDP packets, which the ESP32 consumes to render synchronized LED and mist behaviors.” [vision/config.yaml](vision/config.yaml#L5-L9), [vision/src/bond_fire_vision/packet_builder.py](vision/src/bond_fire_vision/packet_builder.py#L55-L150)
@@ -251,17 +244,18 @@ char packetBuffer[1500]; // buffer for v2.1 packets
 
 ## MEMBER 4 (Option B): Vision Detection Accuracy and Robustness Testing
 
-**Topic:** Detection quality for people and phone classes and ROI accuracy.
+**Topic:** Detection quality for people class and ROI accuracy.
 
-**Focus:** Define a comprehensive test plan for detection accuracy, robustness to lighting, and phone false positives.
+**Focus:** Define a comprehensive test plan for detection accuracy and robustness to lighting and background clutter.
 
 **Required Specs (Extrapolate from Code):**
-- YOLO confidence threshold `confidence_threshold=0.5` [vision/config.yaml](vision/config.yaml#L43-L46)
-- Class IDs: person 0, phone 67 [vision/config.yaml](vision/config.yaml#L43-L46)
-- Prompt cooldowns to avoid test contamination (normal/phone/same-state cooldowns at 22 s) [vision/config.yaml](vision/config.yaml#L12-L15)
+- YOLO confidence threshold `confidence_threshold=0.08` [vision/config.yaml](vision/config.yaml#L43-L52)
+- Class ID: person 0 [vision/config.yaml](vision/config.yaml#L43-L52)
+- Minimum person area ratio `min_person_area_ratio=0.08` and IOU threshold `iou_threshold=0.45` [vision/config.yaml](vision/config.yaml#L43-L52)
+- Prompt cooldowns to avoid test contamination (normal/same-state cooldowns at 22 s) [vision/config.yaml](vision/config.yaml#L11-L15)
 
 **Diagram Instruction:**
-- Include a confusion matrix for person vs phone detection and a histogram of detection confidences (separate bins for true positive and false positive).
+- Include a confusion matrix for person detection (TP/FP/FN/TN) and a histogram of detection confidences (separate bins for true positive and false positive).
 
 **Required Deliverables:**
 - A test dataset plan: at least 6 scenes, 3 lighting conditions (bright, dim, mixed), 2 camera distances, minimum 300 labeled frames.
@@ -269,7 +263,7 @@ char packetBuffer[1500]; // buffer for v2.1 packets
 - A pass/fail rubric tied to the success thresholds in the checklist.
 
 **Distinction Checklist:**
-- Write this sentence verbatim: “Success threshold: person detection recall ≥ 0.90 and phone detection precision ≥ 0.95 at `confidence_threshold=0.5`, validated by confusion matrices and confidence histograms across lighting conditions.” [vision/config.yaml](vision/config.yaml#L43-L46)
+- Write this sentence verbatim: “Success threshold: person detection recall ≥ 0.90 and precision ≥ 0.95 at `confidence_threshold=0.08`, validated by confusion matrices and confidence histograms across lighting conditions.” [vision/config.yaml](vision/config.yaml#L43-L52)
 
 ---
 
