@@ -112,24 +112,25 @@ int fanDirection = 5;
 int mistPower = MIST_IDLE;
 int mistDirection = 5;
 
-// Matrix Scrolling with Smart Queue System
-String scrollingText = "Booting...";  // Currently displayed text
-String stateText = "Waiting...";      // Text that SHOULD be displayed for current state
-String lastStateText = "";            // Previous state text (to ignore duplicate text)
-int scrollX = 32;  // Start at matrix width
-uint8_t scrollCounter = 0;
-const uint8_t SCROLL_SPEED_NORMAL = 3;  // Every 3 frames (~33ms per pixel)
-const uint8_t SCROLL_SPEED_FAST = 1;    // Every frame (~10ms per pixel)
-bool isTextFullyVisible = true;  // Track if current text is fully rendered on screen
-unsigned long textHoldUntil = 0;  // Hold text on screen for readability
-const unsigned long TEXT_HOLD_MS = 0;  // Minimum dwell when fully visible (0 disables pause)
-const unsigned long MIN_VISIBLE_BEFORE_FAST_MS = 0;  // Visible time before fast-exit
-unsigned long lastPromptAt = 0;  // Track when a prompt was last received
-const unsigned long PROMPT_STALE_MS = 2000;  // Allow state fallback if no prompt
-bool pendingTextReady = false;  // New text queued from master or state fallback
-bool holdAppliedForCurrentText = false;  // Ensure hold happens once per text
-bool speedUpToExit = false;  // Speed up when a new prompt is queued
-unsigned long visibleSince = 0;  // Track when current text became visible
+// Matrix flicker palettes
+const CRGB firewoodPalette[4] = {
+  CRGB(20, 8, 2),    // Deep char
+  CRGB(60, 24, 6),   // Dark bark
+  CRGB(110, 50, 12), // Warm brown
+  CRGB(170, 80, 20)  // Hot ember
+};
+const CRGB idleBluePalette[4] = {
+  CRGB(4, 12, 24),   // Deep blue
+  CRGB(6, 24, 60),   // Night blue
+  CRGB(10, 60, 110), // Cool blue
+  CRGB(20, 120, 170) // Bright blue
+};
+const CRGB partyPalette[4] = {
+  CRGB(80, 0, 120),  // Purple
+  CRGB(180, 20, 120),// Magenta
+  CRGB(30, 160, 200),// Cyan
+  CRGB(200, 60, 0)   // Orange
+};
 
 // Special Effects Timers
 unsigned long entryFlashUntil = 0;
@@ -175,6 +176,8 @@ void setup() {
   Serial.println("[INIT] Initializing PWM for fan and mist...");
   ledcAttach(PIN_FAN, 5000, 8);    // 5kHz, 8-bit
   ledcAttach(PIN_MIST, 1000, 8);   // 1kHz, 8-bit
+  ledcWrite(PIN_MIST, MIST_MAX);
+  delay(500);
   ledcWrite(PIN_MIST, MIST_IDLE);
   ledcWrite(PIN_FAN, 60);
 
@@ -235,7 +238,6 @@ void setup() {
   udp.begin(localPort);
 
   // 6. INIT STATE
-  scrollingText = "Waiting...";
   currentStateConfig.state = STATE_IDLE;
   currentStateConfig.mist_pwm = MIST_IDLE;
   currentStateConfig.fan_pwm = 60;
@@ -358,33 +360,10 @@ void handlePacket() {
     );
   }
 
-  // --- Parse Prompt Text ---
-  const char* prompt = doc["prompt"];
-  if (prompt) {
-    String nextPrompt = String(prompt);
-    lastPromptAt = millis();
-    if (nextPrompt != stateText) {
-      stateText = nextPrompt;
-      pendingTextReady = true;
-    }
-  }
-
   // --- Handle Entry Flash ---
   if (currentStateConfig.entry_flash_id != -1) {
-    // Look up person color from people array
-    for (JsonObject person : peopleArray) {
-      if (person["id"] == currentStateConfig.entry_flash_id) {
-        JsonArray colorArray = person["color"];
-        if (colorArray.isNull() || colorArray.size() < 3) {
-          colorArray = person["shirt_rgb"];
-        }
-        if (!colorArray.isNull() && colorArray.size() >= 3) {
-          entryFlashColor = CRGB(colorArray[0], colorArray[1], colorArray[2]);
-          entryFlashUntil = millis() + 3000;  // Flash for 3 seconds
-        }
-        break;
-      }
-    }
+    entryFlashColor = CRGB(255, 160, 60);
+    entryFlashUntil = millis() + 2000;  // Flash for 2 seconds
   }
 
   // Debug output (optional)
@@ -437,26 +416,6 @@ void applyStateEffects() {
     colorTransitionStart = now;
     pendingStateColor = candidateState;
     
-    // Determine fallback text ONLY if prompts have gone stale
-    if (now - lastPromptAt > PROMPT_STALE_MS) {
-      String newStateText = "";
-      switch (candidateState) {
-        case STATE_IDLE:
-          newStateText = "Waiting...";
-          break;
-        case STATE_FIRE:
-          newStateText = "Warming up...";
-          break;
-        case STATE_PARTY:
-          newStateText = "PARTY!";
-          break;
-      }
-      if (newStateText != lastStateText) {
-        stateText = newStateText;
-        lastStateText = newStateText;
-        pendingTextReady = true;
-      }
-    }
   }
 
   // Apply color transition if active (smooth subtle blend)
@@ -504,10 +463,6 @@ void renderStateEffects() {
 
     case STATE_FIRE:
       renderFireEffect();
-      // Pulse effect overlays on fire (triggered by pulse_active from Python)
-      if (currentStateConfig.pulse_active) {
-        renderPulseEffect();
-      }
       if (currentStateConfig.fan_pulse > 0.01f) {
         renderFanPulseEffect();
       }
@@ -683,167 +638,49 @@ uint16_t matrixColorFromCRGB(const CRGB& color) {
   return matrixFront.Color(color.r, color.g, color.b);
 }
 
-CRGB applyTextFlicker(CRGB base, uint8_t minScale, uint8_t maxScale) {
-  uint8_t scale = (maxScale < 255)
-    ? random8(minScale, (uint8_t)(maxScale + 1))
-    : random8(minScale, maxScale);
-  base.nscale8_video(scale);
-  return base;
-}
-
-CRGB getRingSampleColor() {
-  if (NUM_LEDS_RING == 0) {
-    return CRGB::Black;
-  }
-
-  uint16_t idxA = 0;
-  uint16_t idxB = NUM_LEDS_RING / 3;
-  uint16_t idxC = (NUM_LEDS_RING * 2) / 3;
-
-  CRGB sample = ringLeds[idxA];
-  sample += ringLeds[idxB];
-  sample += ringLeds[idxC];
-  sample.nscale8_video(85); // Average of 3 samples
-  return sample;
-}
-
-CRGB boostTextReadability(CRGB color, uint8_t minMaxChannel) {
-  uint8_t maxChannel = max(color.r, max(color.g, color.b));
-  if (maxChannel < 1) {
-    return color;
-  }
-  if (maxChannel < minMaxChannel) {
-    uint8_t scale = (uint8_t)((minMaxChannel * 255) / maxChannel);
-    color.nscale8_video(scale);
-  }
-  return color;
-}
-
-CRGB getMatrixFireTextColor() {
-  uint8_t heat = fireHeat[random8(NUM_LEDS_RING)];
-  uint8_t paletteIndex = scale8(heat, 240);
-  CRGB color = ColorFromPalette(firePalette, paletteIndex, 255, LINEARBLEND);
-  return color;
-}
-
-uint16_t getMatrixTextColor() {
-  CRGB ringSample = getRingSampleColor();
-  CRGB color = CRGB::Black;
-
+const CRGB* getMatrixPalette() {
   switch (currentStateConfig.state) {
-    case STATE_IDLE: {
-      color = CHSV(160, 180, 170);
-      break;
-    }
+    case STATE_IDLE:
+      return idleBluePalette;
+    case STATE_PARTY:
+      return partyPalette;
     case STATE_FIRE:
-      color = CRGB(255, 120, 0);
-      break;
-    case STATE_PARTY: {
-      uint8_t hue = (uint8_t)(rainbowPhase * 255.0f);
-      color = CHSV(hue, 255, 255);
-      break;
+    default:
+      return firewoodPalette;
+  }
+}
+
+CRGB getFlickerColor(uint8_t heat) {
+  const CRGB* palette = getMatrixPalette();
+  uint8_t idx = scale8(heat, 3);
+  uint8_t next = (idx < 3) ? (idx + 1) : 3;
+  uint8_t blendAmount = (heat % 64) * 4;
+  return blend(palette[idx], palette[next], blendAmount);
+}
+
+void renderMatrixFirewood() {
+  uint16_t t = (uint16_t)(millis() / 4);
+
+  for (int y = 0; y < matrixFront.height(); y++) {
+    for (int x = 0; x < matrixFront.width(); x++) {
+      uint8_t noise = inoise8(x * 40, y * 80, t);
+      uint8_t heat = scale8(noise, 160) + 40;
+      uint8_t flicker = random8(0, 20);
+      heat = qadd8(heat, flicker);
+      CRGB color = getFlickerColor(heat);
+      matrixFront.drawPixel(x, y, matrixColorFromCRGB(color));
     }
   }
 
-  // Subtle match to ring shade without introducing flicker.
-  color = blend(color, ringSample, 50);
-
-  // Keep text legible across states.
-  color = boostTextReadability(color, 170);
-
-  return matrixColorFromCRGB(color);
+  matrixFront.show();
 }
 
 /**
- * Update the LED matrix with scrolling text
- * Migrated from working.ino matrix update logic
+ * Update the LED matrix with a firewood flicker effect
  */
 void updateMatrixDisplay() {
-  // Normal display: smooth scrolling text
   matrixFront.fillScreen(0);
-  matrixFront.setCursor(scrollX, 0);
-
-  // Set text color to match ring state and apply fire-like flicker
-  matrixFront.setTextColor(getMatrixTextColor());
-  matrixFront.print(scrollingText);
-  matrixFront.show();
-
-  // TEXT SCROLL: Smart queue-based logic
-  // Calculate text width for exit/visibility detection
-  int textWidthPixels = scrollingText.length() * 6;  // ~6 pixels per character
-
-  unsigned long now = millis();
-  if (pendingTextReady && scrollingText != stateText) {
-    speedUpToExit = true;
-  }
-
-  if (!speedUpToExit && TEXT_HOLD_MS > 0 && textHoldUntil > 0) {
-    if (now < textHoldUntil) {
-      return;  // Hold text on screen for readability
-    }
-    textHoldUntil = 0;
-  }
-
-  uint8_t scrollSpeed = speedUpToExit ? SCROLL_SPEED_FAST : SCROLL_SPEED_NORMAL;
-  
-  if (++scrollCounter >= scrollSpeed) {
-    scrollCounter = 0;
-    scrollX--;
-    
-    // PART 1: Check if old text has COMPLETELY exited the screen
-    if (scrollX < (int)-(textWidthPixels)) {
-      // Current text has completely exited - now switch to stateText
-      scrollX = matrixFront.width();  // Reset position to right edge
-      scrollingText = stateText;       // Switch to the new text
-      if (pendingTextReady) {
-        pendingTextReady = false;
-      }
-      speedUpToExit = false;
-      isTextFullyVisible = false;      // Mark new text as entering (not yet fully visible)
-      holdAppliedForCurrentText = false;
-      textHoldUntil = 0;
-      visibleSince = 0;
-    }
-    
-    // PART 2: Track when new text is FULLY visible on screen
-    // Text is fully visible when: left edge has entered (scrollX < width) AND right edge hasn't exited yet
-    if (scrollingText == stateText && !isTextFullyVisible) {
-      // Check if new text is now fully on screen and readable
-      int textRightEdge = scrollX + textWidthPixels;
-      
-      // Text is fully visible when it's entirely within the matrix bounds
-      if (scrollX <= 0 && textRightEdge >= matrixFront.width()) {
-        // Text is spanning the full width - it's readable but still scrolling
-        isTextFullyVisible = true;
-      } else if (scrollX < 0 && textRightEdge > 0) {
-        // Text is at least partially visible
-        isTextFullyVisible = true;
-      }
-    }
-
-    if (!speedUpToExit && TEXT_HOLD_MS > 0 && isTextFullyVisible && !holdAppliedForCurrentText) {
-      if (visibleSince == 0) {
-        visibleSince = now;
-      }
-      textHoldUntil = now + TEXT_HOLD_MS;
-      holdAppliedForCurrentText = true;
-      return;
-    }
-    
-    // PART 3: Detect when text has COMPLETELY exited on the left
-    // This is needed to ensure it fully scrolls off before any new changes
-    if (scrollingText == stateText && isTextFullyVisible) {
-      int textRightEdge = scrollX + textWidthPixels;
-      
-      // If text is still visible, keep marking it as fully visible
-      if (textRightEdge > 0) {
-        isTextFullyVisible = true;
-      } else {
-        // Text has completely exited the left side
-        isTextFullyVisible = false;
-      }
-    }
-  }
+  renderMatrixFirewood();
 }
 
 

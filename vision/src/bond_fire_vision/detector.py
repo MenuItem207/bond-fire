@@ -14,12 +14,6 @@ from ultralytics import YOLO
 
 from .audio_manager import AudioManager, AudioState
 from .config import get_config
-from .color_analysis import (
-    are_colors_contrasting,
-    extract_dominant_color,
-    get_color_name,
-    get_palette_from_people,
-)
 from .local_prompts import LocalPromptGenerator
 from .firebase_shake import FirebaseShakeListener
 from .packet_builder import PacketBuilderV2, Person
@@ -78,7 +72,7 @@ class BondFireVision:
             broadcast_ip: UDP broadcast IP
             broadcast_port: UDP port
             updates_per_second: Target packet rate
-            pulse_interval: Seconds between color pulses
+            pulse_interval: Seconds between pulses (unused)
             enable_audio: Enable audio subsystem
             audio_volume: Master audio volume (0.0-1.0)
             narration_enabled: Enable TTS prompts
@@ -153,10 +147,6 @@ class BondFireVision:
         self._entry_prompt_id: Optional[int] = None
         self._entry_prompt_until: Optional[float] = None
         self._entry_prompt: Optional[str] = None
-        self._pulse_prompt_until: Optional[float] = None
-        self._pulse_prompt: Optional[str] = None
-        self._pulse_prompt_duration = 2.0
-        self._pulse_active_last = False
 
     def run(self, display: bool = True) -> VisionState:
         """
@@ -351,7 +341,7 @@ class BondFireVision:
         return None
 
     def analyze_frame(self, frame: Any, annotate: bool = True) -> tuple[VisionState, Any]:
-        """Analyze a single frame with tracking and color extraction."""
+        """Analyze a single frame with tracking."""
         height, width = frame.shape[:2]
         roi_pixels = self._roi_pixels(width, height)
 
@@ -395,18 +385,14 @@ class BondFireVision:
                     if inside:
                         person_count += 1
                         
-                        # Extract shirt color
-                        shirt_rgb = extract_dominant_color(frame, (x1, y1, x2, y2))
-                        shirt_name = get_color_name(shirt_rgb)
-                        
                         # Normalize bbox
                         bbox_norm = (x1 / width, y1 / height, x2 / width, y2 / height)
                         
                         person = Person(
                             id=tid,
                             bbox=bbox_norm,
-                            shirt_rgb=shirt_rgb,
-                            shirt_name=shirt_name,
+                            shirt_rgb=(0, 0, 0),
+                            shirt_name="",
                         )
                         people_in_roi.append(person)
                         self._tracked_people[tid] = person
@@ -416,7 +402,7 @@ class BondFireVision:
                         thickness = 2 if inside else 1
                         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
                         if inside:
-                            label = f"ID:{tid} {self._tracked_people.get(tid, person).shirt_name if tid in self._tracked_people or inside else ''}"
+                            label = f"ID:{tid}"
                             cv2.putText(frame, label, (int(x1), max(int(y1) - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         # Phone detection removed - using MQTT shake detection instead
@@ -534,14 +520,7 @@ class BondFireVision:
         # Get people list
         people = list(self._tracked_people.values())
 
-        # Generate palette from people colors
-        people_colors = [p.shirt_rgb for p in people]
-        dominant_palette = get_palette_from_people(people_colors, max_colors=4)
-
-        # Check for color contrasts
-        colors_contrasting = False
-        if len(people_colors) >= 2:
-            colors_contrasting = are_colors_contrasting(people_colors[0], people_colors[1])
+        dominant_palette: list[int] = []
 
         # Handle entry flash and prompts
         if state_output.entry_flash_id:
@@ -550,36 +529,17 @@ class BondFireVision:
                 or self._entry_prompt_until is None
                 or timestamp >= self._entry_prompt_until
             ):
-                person = self._tracked_people.get(state_output.entry_flash_id)
-                if person:
-                    self._entry_prompt = self.prompt_generator.get_entry_prompt(person.shirt_name)
-                    if self.audio_manager:
-                        self.audio_manager.play_sfx("whoosh", volume=0.65)
-                else:
-                    self._entry_prompt = self.prompt_generator.generate(
-                        state_output.state,
-                        len(people),
-                        len(set(p.shirt_rgb for p in people)),
-                        colors_contrasting,
-                    )
+                self._entry_prompt = self.prompt_generator.get_entry_prompt()
+                if self.audio_manager:
+                    self.audio_manager.play_sfx("whoosh", volume=0.65)
                 self._entry_prompt_id = state_output.entry_flash_id
                 self._entry_prompt_until = timestamp + self.state_machine.ENTRY_FLASH_DURATION
             prompt = self._entry_prompt or ""
             self._last_entry_id = state_output.entry_flash_id
-        elif state_output.pulse_active:
-            if not self._pulse_active_last:
-                color_names = sorted(p.shirt_name for p in people if p.shirt_name)
-                self._pulse_prompt = self.prompt_generator.get_pulse_prompt(color_names)
-                self._pulse_prompt_until = timestamp + self._pulse_prompt_duration
-                if self.audio_manager:
-                    self.audio_manager.play_sfx("chime", volume=0.3)
-            prompt = self._pulse_prompt or ""
         else:
             self._entry_prompt_id = None
             self._entry_prompt_until = None
             self._entry_prompt = None
-            self._pulse_prompt_until = None
-            self._pulse_prompt = None
             # Normal prompt
             cooldown_override = None
             if self._last_prompt_state == state_output.state:
@@ -587,12 +547,11 @@ class BondFireVision:
             prompt = self.prompt_generator.generate(
                 state_output.state,
                 len(people),
-                len(set(p.shirt_rgb for p in people)),
-                colors_contrasting,
+                None,
+                False,
                 cooldown_override=cooldown_override,
             )
 
-        self._pulse_active_last = state_output.pulse_active
         self._last_prompt_state = state_output.state
 
         # Narrate prompts when they change

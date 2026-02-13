@@ -59,8 +59,8 @@ class StateMachine:
     PARTY_DWELL = 2.0  # Seconds with ≥5 people to enter PARTY
     PARTY_EXIT_DWELL = 3.0  # Seconds with <4 people to exit PARTY
     PARTY_ENTRY_BUILDUP = 1.5  # Seconds of light show build-up before full party
-    PULSE_INTERVAL = 15.0  # Seconds between color pulses
-    ENTRY_FLASH_DURATION = 3.0  # Seconds to flash new person's color
+    PULSE_INTERVAL = 15.0  # Seconds between pulses (unused)
+    ENTRY_FLASH_DURATION = 2.0  # Seconds to flash on new entry
 
     # Hardware limits
     MIST_MIN = 150
@@ -89,7 +89,6 @@ class StateMachine:
         self._idle_start: Optional[float] = None
         self._party_dwell_start: Optional[float] = None
         self._party_exit_start: Optional[float] = None
-        self._last_pulse_time: Optional[float] = None
         self._entry_flash_until: Optional[float] = None
         self._entry_flash_id: Optional[int] = None
         self._fire_entry_start: Optional[float] = None
@@ -117,7 +116,7 @@ class StateMachine:
         if active_ids is not None:
             new_ids = active_ids - self._known_ids
             if new_ids and self.state == State.FIRE:
-                # Flash the first new person
+                # Flash on the first new person
                 self._entry_flash_id = next(iter(new_ids))
                 self._entry_flash_until = now + self.ENTRY_FLASH_DURATION
             self._known_ids = active_ids.copy()
@@ -178,26 +177,20 @@ class StateMachine:
         print(f"[STATE] {self.state.value} → {new_state.value}", flush=True)
         self.state = new_state
         self._state_enter_time = timestamp
-        # Reset pulse timer on state change
-        self._last_pulse_time = None
+        # Reset any entry flash state on state change
+        self._entry_flash_until = None
+        self._entry_flash_id = None
 
     def _get_output(self, context: StateContext, now: float) -> StateOutput:
         """Build state output based on current state."""
         people = context.people_count
 
-        # Entry flash (overrides pulse)
+        # Entry flash
         entry_flash_id = None
         if self._entry_flash_until is not None and now < self._entry_flash_until:
             entry_flash_id = self._entry_flash_id
 
-        # Pulse logic (every PULSE_INTERVAL seconds, not during entry flash)
         pulse_active = False
-        if entry_flash_id is None:
-            if self._last_pulse_time is None:
-                self._last_pulse_time = now
-            elif now - self._last_pulse_time >= self.PULSE_INTERVAL:
-                pulse_active = True
-                self._last_pulse_time = now
 
         # Party buildup progress
         party_buildup_progress = 0.0

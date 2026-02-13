@@ -41,7 +41,7 @@ class LocalPromptGenerator:
         "Make eye contact with a stranger. I dare you.",
         "Solo is cool, duo is warmer.",
         "Don't scroll. Wave at the next person.",
-        "I'm judging your outfit. Come closer.",
+        "Come closer. I dare you.",
         "Wait for it... someone cool is coming.",
     ]
 
@@ -85,16 +85,6 @@ class LocalPromptGenerator:
         "Full house! Don't break the chain.",
     ]
 
-    # Color-aware prompts (when multiple people have distinct colors)
-    COLOR_PROMPTS = [
-        "Wah, this palette is expensive.",
-        "You guys coordinated this? Liar.",
-        "Fit check: immaculate.",
-        "Power Rangers vibes today.",
-        "Different styles, same heat.",
-        "Who dressed you guys? Good job.",
-    ]
-
     def __init__(self, history_size: int = 10, prompt_cooldown: Optional[float] = None) -> None:
         """
         Initialize prompt generator.
@@ -104,8 +94,6 @@ class LocalPromptGenerator:
             prompt_cooldown: Minimum seconds between prompt changes. If None, uses config value (default: 8.0)
         """
         self._history: deque[str] = deque(maxlen=history_size)
-        self._color_prompt_enabled = False
-        
         # Load cooldown timing from config if not provided
         if prompt_cooldown is None:
             cfg = get_config()
@@ -151,21 +139,17 @@ class LocalPromptGenerator:
         elif state == State.PARTY:
             pool = self.PARTY_PROMPTS
         elif state == State.FIRE:
-            # Use color-aware prompts if we have contrasting colors
-            if colors_contrasting and color_count and color_count >= 2:
-                pool = self.COLOR_PROMPTS
+            # Select based on people count
+            if people_count == 1:
+                pool = self.FIRE_1_PROMPTS
+            elif people_count == 2:
+                pool = self.FIRE_2_PROMPTS
+            elif people_count == 3:
+                pool = self.FIRE_3_PROMPTS
+            elif people_count >= 4:
+                pool = self.FIRE_4_PROMPTS
             else:
-                # Select based on people count
-                if people_count == 1:
-                    pool = self.FIRE_1_PROMPTS
-                elif people_count == 2:
-                    pool = self.FIRE_2_PROMPTS
-                elif people_count == 3:
-                    pool = self.FIRE_3_PROMPTS
-                elif people_count >= 4:
-                    pool = self.FIRE_4_PROMPTS
-                else:
-                    pool = self.IDLE_PROMPTS
+                pool = self.IDLE_PROMPTS
         else:
             pool = self.IDLE_PROMPTS
 
@@ -206,53 +190,21 @@ class LocalPromptGenerator:
             active_cooldown = max(active_cooldown, cooldown_override)
         return (now - self._last_prompt_time) < active_cooldown
 
-    def get_entry_prompt(self, person_color_name: Optional[str] = None) -> str:
+    def get_entry_prompt(self) -> str:
         """
         Generate a welcome prompt for a new person entering.
-
-        Args:
-            person_color_name: Name of the person's shirt color (optional)
 
         Returns:
             Welcome prompt string
         """
-        if person_color_name:
-            prompts = [
-                f"Eh {person_color_name}, come in.",
-                f"{person_color_name} shirt, nice. Join.",
-                f"New spark: {person_color_name}.",
-                f"{person_color_name} just joined.",
-            ]
-        else:
-            prompts = [
-                "Eh, jump in.",
-                "Come in, don't shy.",
-                "New spark in.",
-                "Fresh energy.",
-            ]
+        prompts = [
+            "Eh, jump in.",
+            "Come in, don't shy.",
+            "New spark in.",
+            "Fresh energy.",
+        ]
 
         return random.choice(prompts)
-
-    def get_pulse_prompt(self, color_names: list[str]) -> str:
-        """
-        Generate a prompt for the periodic color pulse.
-
-        Args:
-            color_names: List of color names in the current group
-
-        Returns:
-            Pulse prompt string
-        """
-        if not color_names:
-            return "Color combo: all of you."
-
-        if len(color_names) == 1:
-            return f"Color combo: {color_names[0]}."
-        elif len(color_names) == 2:
-            return f"Color combo: {color_names[0]} + {color_names[1]}."
-        else:
-            # Multiple colors
-            return f"Color combo: {', '.join(color_names[:3])}."
 
     def clear_history(self) -> None:
         """Clear prompt history (useful for testing or reset)."""

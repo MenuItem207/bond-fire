@@ -11,7 +11,6 @@ import json
 from typing import Tuple
 
 from .audio_manager import AudioManager, AudioState
-from .color_analysis import are_colors_contrasting, get_palette_from_people
 from .detector import BondFireVision
 from .config import get_config
 from .local_prompts import LocalPromptGenerator
@@ -90,7 +89,7 @@ def main() -> None:
         "--pulse-interval",
         type=float,
         default=15.0,
-        help="Seconds between color pulses in FIRE mode.",
+        help="Seconds between pulses (unused).",
     )
     parser.add_argument(
         "--enable-audio",
@@ -258,11 +257,7 @@ def _run_manual_state(
             state = state_output.state
 
             people = _make_people(people_count, colors)
-            people_colors = [p.shirt_rgb for p in people]
-            dominant_palette = get_palette_from_people(people_colors, max_colors=4)
-            colors_contrasting = False
-            if len(people_colors) >= 2:
-                colors_contrasting = are_colors_contrasting(people_colors[0], people_colors[1])
+            dominant_palette: list[int] = []
 
             mist_pwm = state_output.mist_pwm
             fan_pwm = state_output.fan_pwm
@@ -275,22 +270,19 @@ def _run_manual_state(
                 prompt = prompt_generator.generate(
                     state_output.state,
                     people_count,
-                    len(set(p.shirt_rgb for p in people)),
-                    colors_contrasting,
+                    None,
+                    False,
                     cooldown_override=same_state_cooldown,
                 )
             elif state_output.entry_flash_id and state_output.entry_flash_id != last_entry_id:
                 prompt = prompt_generator.get_entry_prompt()
                 last_entry_id = state_output.entry_flash_id
-            elif state_output.pulse_active:
-                color_names = [p.shirt_name for p in people if p.shirt_name]
-                prompt = prompt_generator.get_pulse_prompt(color_names)
             else:
                 prompt = prompt_generator.generate(
                     state_output.state,
                     people_count,
-                    len(set(p.shirt_rgb for p in people)),
-                    colors_contrasting,
+                    None,
+                    False,
                     cooldown_override=same_state_cooldown if last_prompt_state == state else None,
                 )
 
