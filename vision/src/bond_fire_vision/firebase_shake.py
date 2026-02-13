@@ -45,7 +45,7 @@ class FirebaseShakeListener:
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._use_rest = False
-        self._shake_events: dict = {}  # user_id -> timestamp_sec
+        self._shake_events: dict = {}  # user_id -> {timestamp_sec, color}
         self._lock = threading.Lock()
 
         self._initialize_firebase()
@@ -124,7 +124,8 @@ class FirebaseShakeListener:
                 if isinstance(data, dict):
                     for user_id, payload in data.items():
                         timestamp_sec = self._parse_timestamp_sec(payload, current_sec)
-                        self._record_shake(user_id, timestamp_sec)
+                        color = self._parse_color(payload)
+                        self._record_shake(user_id, timestamp_sec, color)
                 self._cleanup_expired_shakes()
             except Exception as exc:
                 now = time.time()
@@ -137,38 +138,58 @@ class FirebaseShakeListener:
         """Remove shake events older than shake_timeout."""
         with self._lock:
             current_time = int(time.time())
-            expired = [
-                uid for uid, ts in self._shake_events.items()
-                if current_time - ts > self.shake_timeout
-            ]
+            expired = []
+            for uid, payload in self._shake_events.items():
+                ts = payload.get("timestamp_sec") if isinstance(payload, dict) else None
+                if ts is None or current_time - ts > self.shake_timeout:
+                    expired.append(uid)
             for uid in expired:
                 del self._shake_events[uid]
 
     def get_wind_value(self) -> int:
+        wind_value, _colors = self.get_wind_snapshot()
+        return wind_value
+
+    def get_wind_snapshot(self) -> tuple[int, list[tuple[int, int, int]]]:
         """
-        Get current wind value (0-100) based on active shakes.
-        
+        Get current wind value (0-100) and active fan colors.
+
         Calculation:
         - Count unique active shake events (0 to max_concurrent_shakes)
         - Scale to 0-100 range
-        - Returns: (count / max_concurrent_shakes) * wind_max
+        - Collect colors from active shake events within shake_timeout
         """
         with self._lock:
             self._cleanup_expired_shakes()
             current_sec = int(time.time())
-            active_count = sum(1 for ts in self._shake_events.values() if ts == current_sec)
+            active_count = 0
+            colors: list[tuple[int, int, int]] = []
+            seen = set()
+            for payload in self._shake_events.values():
+                ts = payload.get("timestamp_sec")
+                if ts == current_sec:
+                    active_count += 1
+                color = payload.get("color")
+                if color is not None:
+                    key = tuple(color)
+                    if key not in seen:
+                        seen.add(key)
+                        colors.append(key)
             active_count = min(active_count, self.max_concurrent_shakes)
 
         wind_value = 0
         if self.max_concurrent_shakes > 0:
             wind_value = int((active_count / self.max_concurrent_shakes) * self.wind_max)
-        return wind_value
+        return wind_value, colors
 
-    def _record_shake(self, user_id: str, timestamp_sec: int) -> None:
+    def _record_shake(self, user_id: str, timestamp_sec: int, color) -> None:
         if not user_id:
             return
         with self._lock:
-            self._shake_events[user_id] = timestamp_sec
+            self._shake_events[user_id] = {
+                "timestamp_sec": timestamp_sec,
+                "color": color,
+            }
 
     def _fetch_shakes_for_second(self, timestamp_sec: int):
         base_url = self.firebase_url.rstrip("/")
@@ -195,7 +216,8 @@ class FirebaseShakeListener:
             return
         for user_id, payload in bucket_data.items():
             timestamp_sec = self._parse_timestamp_sec(payload, sec_key)
-            self._record_shake(user_id, timestamp_sec)
+            color = self._parse_color(payload)
+            self._record_shake(user_id, timestamp_sec, color)
 
     def _process_event_data(self, path: str, data) -> None:
         parts = [part for part in path.split("/") if part]
@@ -209,14 +231,37 @@ class FirebaseShakeListener:
         if len(parts) >= 2:
             sec_key, user_id = parts[0], parts[1]
             timestamp_sec = self._parse_timestamp_sec(data, sec_key)
-            self._record_shake(user_id, timestamp_sec)
+            color = self._parse_color(data)
+            self._record_shake(user_id, timestamp_sec, color)
             return
 
         sec_key = parts[0]
         if isinstance(data, dict) and "user_id" in data:
             user_id = data.get("user_id", "unknown")
             timestamp_sec = self._parse_timestamp_sec(data, sec_key)
-            self._record_shake(user_id, timestamp_sec)
+            color = self._parse_color(data)
+            self._record_shake(user_id, timestamp_sec, color)
             return
 
         self._process_second_bucket(sec_key, data)
+
+    def _parse_color(self, payload):
+        if not isinstance(payload, dict):
+            return None
+        rgb = payload.get("color_rgb")
+        if isinstance(rgb, list) and len(rgb) >= 3:
+            try:
+                return (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+            except (TypeError, ValueError):
+                return None
+        hex_value = payload.get("color_hex")
+        if isinstance(hex_value, str) and hex_value.startswith("#") and len(hex_value) == 7:
+            try:
+                return (
+                    int(hex_value[1:3], 16),
+                    int(hex_value[3:5], 16),
+                    int(hex_value[5:7], 16),
+                )
+            except ValueError:
+                return None
+        return None

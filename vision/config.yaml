@@ -62,3 +62,9 @@ debug:
   verbose_logging: false      # Print detailed state transitions and audio events
   log_prompts: false          # Log all generated prompts
   disable_tts: false          # Disable speech synthesis (audio still works for SFX/music)
+
+# Fan pulse visuals (from RTDB/webapp)
+fanning_pulse:
+  min_wind: 15           # Minimum wind to trigger color pulse
+  pulse_duration: 2.2    # Seconds for a full pulse envelope
+  pulse_interval: 2.4    # Minimum seconds between pulses

@@ -366,6 +366,8 @@ class BondFireProjection(mglw.WindowConfig):
         self._video_texture = None
         self._smoothed_palette: List[Tuple[float, float, float]] = []
         self._smoothed_state_color: Tuple[float, float, float] = (1.0, 0.5, 0.1)
+        self._smoothed_fan_pulse: float = 0.0
+        self._smoothed_fan_color: Tuple[float, float, float] = (1.0, 0.5, 0.1)
         self._state_current_index = self._state_to_index(self._state.state_name)
         self._state_prev_index = self._state_current_index
         self._state_transition_start = -1.0
@@ -481,6 +483,9 @@ class BondFireProjection(mglw.WindowConfig):
                 uniform float u_pulse_strength;
                 uniform float u_force_pulse;
                 uniform float u_party;
+                uniform float u_fan_pulse;
+                uniform vec3 u_fan_color;
+                uniform float u_fan_strength;
                 uniform vec3 u_palette[4];
                 uniform vec3 u_state_color;
                 uniform float u_ring_floor;
@@ -640,6 +645,15 @@ class BondFireProjection(mglw.WindowConfig):
                     color += u_palette[2] * pulse * 0.6;
                     color += u_palette[1] * party * 0.5;
                     color += vec3(0.0);
+
+                    float fan_pulse = clamp(u_fan_pulse, 0.0, 1.0);
+                    float fan_radius = mix(u_base_radius + 0.02, u_ring_outer + 0.28, fan_pulse);
+                    float fan_band = smoothstep(fan_radius + 0.04, fan_radius, dist)
+                                   - smoothstep(fan_radius, fan_radius - 0.04, dist);
+                    float fan_glow = smoothstep(fan_radius + 0.18, fan_radius - 0.02, dist);
+                    float fan_gate = smoothstep(0.02, 0.18, fan_pulse);
+                    float fan_gain = fan_gate * (1.0 - fan_pulse) * u_fan_strength;
+                    color += u_fan_color * (fan_band * 1.15 + fan_glow * 0.35) * fan_gain;
 
                     vec3 texture_warm = mix(u_palette[0], u_palette[1], flicker_mix);
                     vec3 texture_hot = mix(u_palette[2], u_palette[3], flicker_mix);
@@ -805,6 +819,16 @@ class BondFireProjection(mglw.WindowConfig):
             dt,
             color_tau,
         )
+        fan_pulse_target = clamp(float(state_snapshot.fan_pulse), 0.0, 1.0)
+        fan_color_target = self._resolve_fan_color(state_snapshot.fan_pulse_color, palette_target)
+        fan_tau = float(self._visuals.get("fan_pulse_lag_sec", 0.18))
+        self._smoothed_fan_pulse = self._smooth_value(self._smoothed_fan_pulse, fan_pulse_target, dt, fan_tau)
+        self._smoothed_fan_color = self._smooth_color(
+            self._smoothed_fan_color,
+            fan_color_target,
+            dt,
+            fan_tau,
+        )
         palette = self._smoothed_palette
         state_color = self._smoothed_state_color
 
@@ -893,6 +917,9 @@ class BondFireProjection(mglw.WindowConfig):
         self._set_uniform(prog, "u_pulse_strength", pulse_strength)
         self._set_uniform(prog, "u_force_pulse", 1.0 if self._visuals.get("always_pulse", True) else 0.0)
         self._set_uniform(prog, "u_party", float(state_snapshot.party_buildup_progress))
+        self._set_uniform(prog, "u_fan_pulse", float(self._smoothed_fan_pulse))
+        self._set_uniform(prog, "u_fan_color", self._smoothed_fan_color)
+        self._set_uniform(prog, "u_fan_strength", float(self._visuals.get("fan_pulse_strength", 1.0)))
         ring_floor = float(self._visuals.get("ring_floor", 0.35))
         ring_floor = clamp(ring_floor + wind_boost * float(self._visuals.get("wind_ring_boost", 0.65)), 0.0, 2.0)
         self._set_uniform(prog, "u_ring_floor", ring_floor)
@@ -993,6 +1020,18 @@ class BondFireProjection(mglw.WindowConfig):
         if palette and len(palette[0]) >= 3:
             r, g, b = palette[0][:3]
             return (r / 255.0, g / 255.0, b / 255.0)
+        return (1.0, 0.5, 0.1)
+
+    @staticmethod
+    def _resolve_fan_color(
+        fan_color: List[int],
+        fallback_palette: List[Tuple[float, float, float]],
+    ) -> Tuple[float, float, float]:
+        if len(fan_color) >= 3:
+            r, g, b = fan_color[:3]
+            return (r / 255.0, g / 255.0, b / 255.0)
+        if fallback_palette:
+            return fallback_palette[1] if len(fallback_palette) > 1 else fallback_palette[0]
         return (1.0, 0.5, 0.1)
 
     def key_event(self, key, action, modifiers) -> None:

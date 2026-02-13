@@ -70,11 +70,13 @@ struct StateConfig {
   uint8_t mist_pwm;
   uint8_t fan_pwm;
   uint8_t wind;
+  float fan_pulse;
   float fire_intensity;
   bool pulse_active;
   int entry_flash_id;
   CRGB palette[4];          // Up to 4 dominant colors
   int palette_size;
+  CRGB fan_pulse_color;
 };
 
 
@@ -238,10 +240,12 @@ void setup() {
   currentStateConfig.mist_pwm = MIST_IDLE;
   currentStateConfig.fan_pwm = 60;
   currentStateConfig.wind = 0;
+  currentStateConfig.fan_pulse = 0.0f;
   currentStateConfig.fire_intensity = 0.0f;
   currentStateConfig.pulse_active = false;
   currentStateConfig.entry_flash_id = -1;
   currentStateConfig.palette_size = 0;
+  currentStateConfig.fan_pulse_color = CRGB(255, 120, 60);
   lastWatchdog = millis();
 
   Serial.println("[INIT] Setup complete. Waiting for packets...\n");
@@ -305,6 +309,8 @@ void handlePacket() {
   currentStateConfig.mist_pwm = doc["mist_pwm"] | MIST_IDLE;
   currentStateConfig.fan_pwm = doc["fan_pwm"] | 60;
   currentStateConfig.wind = doc["wind"] | 0;
+  currentStateConfig.fan_pulse = doc["fan_pulse"] | 0.0f;
+  currentStateConfig.fan_pulse = constrain(currentStateConfig.fan_pulse, 0.0f, 1.0f);
 
   // --- Parse Auxiliary Flags ---
   currentStateConfig.pulse_active = doc["pulse_active"] | false;
@@ -340,6 +346,16 @@ void handlePacket() {
     uint8_t g = paletteArray[i * 3 + 1];
     uint8_t b = paletteArray[i * 3 + 2];
     currentStateConfig.palette[i] = CRGB(r, g, b);
+  }
+
+  // --- Parse Fan Pulse Color ---
+  JsonArray fanPulseColor = doc["fan_pulse_color"];
+  if (!fanPulseColor.isNull() && fanPulseColor.size() >= 3) {
+    currentStateConfig.fan_pulse_color = CRGB(
+      (uint8_t)fanPulseColor[0],
+      (uint8_t)fanPulseColor[1],
+      (uint8_t)fanPulseColor[2]
+    );
   }
 
   // --- Parse Prompt Text ---
@@ -492,6 +508,9 @@ void renderStateEffects() {
       if (currentStateConfig.pulse_active) {
         renderPulseEffect();
       }
+      if (currentStateConfig.fan_pulse > 0.01f) {
+        renderFanPulseEffect();
+      }
       break;
 
     case STATE_PARTY:
@@ -614,6 +633,31 @@ void renderPulseEffect() {
       (baseColor.g * brightness) / 255,
       (baseColor.b * brightness) / 255
     );
+  }
+}
+
+/**
+ * FAN PULSE Effect: Slow color pulse from mobile fanning
+ * Uses fan_pulse (0.0-1.0) and fan_pulse_color
+ */
+void renderFanPulseEffect() {
+  float pulse = currentStateConfig.fan_pulse;
+  if (pulse <= 0.0f) return;
+
+  pulse = constrain(pulse, 0.0f, 1.0f);
+  float gate = 0.0f;
+  if (pulse > 0.01f) {
+    gate = (pulse < 0.14f) ? ((pulse - 0.01f) / 0.13f) : 1.0f;
+  }
+  float gain = gate * (1.0f - pulse);
+  uint8_t mixAmount = (uint8_t)(gain * 220.0f);
+  CRGB pulseColor = currentStateConfig.fan_pulse_color;
+
+  for (int i = 0; i < NUM_LEDS_RING; i++) {
+    float phase = (float)i / (float)max(1, NUM_LEDS_RING);
+    float wave = 0.7f + 0.3f * sin((phase * 6.28318f) + (pulse * 3.14159f));
+    uint8_t localMix = (uint8_t)(mixAmount * wave);
+    nblend(ringLeds[i], pulseColor, localMix);
   }
 }
 
@@ -816,6 +860,7 @@ void watchdogCheck() {
     currentStateConfig.mist_pwm = MIST_IDLE;
     currentStateConfig.fan_pwm = 60;
     currentStateConfig.fire_intensity = 0.0f;
+    currentStateConfig.fan_pulse = 0.0f;
     currentStateConfig.pulse_active = false;
     currentStateConfig.entry_flash_id = -1;
     lastWatchdog = millis();

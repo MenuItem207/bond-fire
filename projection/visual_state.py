@@ -14,6 +14,8 @@ class VisualState:
     pulse_active: bool = False
     party_buildup_progress: float = 0.0
     wind: int = 0
+    fan_pulse: float = 0.0
+    fan_pulse_color: List[int] = field(default_factory=list)
 
     def update_from_packet(self, packet: dict) -> None:
         self.state_name = str(packet.get("state", self.state_name))
@@ -26,3 +28,5 @@ class VisualState:
             packet.get("party_buildup_progress", self.party_buildup_progress)
         )
         self.wind = int(packet.get("wind", self.wind))
+        self.fan_pulse = float(packet.get("fan_pulse", self.fan_pulse))
+        self.fan_pulse_color = list(packet.get("fan_pulse_color", self.fan_pulse_color))

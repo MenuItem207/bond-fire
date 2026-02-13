@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import random
 import socket
 import threading
 import time
@@ -119,6 +121,16 @@ class BondFireVision:
         self._wind_udp_value = 0
         self._wind_udp_last_update = 0.0
         self._wind_udp_lock = threading.Lock()
+        self._wind_udp_colors: list[tuple[int, int, int]] = []
+
+        self._fan_pulse_min_wind = max(0, int(cfg.fanning_pulse.min_wind))
+        self._fan_pulse_duration = max(0.1, float(cfg.fanning_pulse.pulse_duration))
+        self._fan_pulse_interval = max(0.1, float(cfg.fanning_pulse.pulse_interval))
+        self._fan_pulse_value = 0.0
+        self._fan_pulse_color: tuple[int, int, int] = (255, 120, 60)
+        self._fan_pulse_start = 0.0
+        self._fan_pulse_last_trigger = 0.0
+        self._fan_pulse_active = False
 
         if enable_audio:
             self.audio_manager = AudioManager(
@@ -259,7 +271,7 @@ class BondFireVision:
                         display = False
                 else:
                     if state != previous_state:
-                        wind = self._shake_listener.get_wind_value() if self._shake_listener else 0
+                        wind = self._get_wind_value(time.monotonic())
                         print(
                             f"Active zone: {state.people_in_roi} people | Wind: {wind:.0f}%",
                             flush=True,
@@ -446,9 +458,9 @@ class BondFireVision:
         cv2.rectangle(frame, (5, 5), (15 + text_w, 40), (0, 0, 0), -1)
         cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-        # Wind bar (shows MQTT shake-based wind value if enabled)
-        if self._shake_listener is not None:
-            wind_value = self._shake_listener.get_wind_value()
+        # Wind bar (shows shake/RTDB wind value if enabled)
+        if self._shake_listener is not None or self._wind_udp_cfg.enabled:
+            wind_value = self._get_wind_value(time.monotonic())
             height, width = frame.shape[:2]
             bar_w = int(width * 0.35)
             bar_h = 18
@@ -622,7 +634,8 @@ class BondFireVision:
             self._last_buildup_step = buildup_step
 
         # Build packet
-        wind_value = self._get_wind_value(timestamp)
+        wind_value, fan_colors = self._get_wind_snapshot(timestamp)
+        self._update_fan_pulse(timestamp, wind_value, fan_colors)
         packet = self.packet_builder.build(
             state=state_output.state,
             people=people,
@@ -631,6 +644,8 @@ class BondFireVision:
             mist_pwm=state_output.mist_pwm,
             fan_pwm=state_output.fan_pwm,
             wind=wind_value,
+            fan_pulse=self._fan_pulse_value,
+            fan_pulse_color=self._fan_pulse_color,
             fire_intensity=state_output.fire_intensity,
             pulse_active=state_output.pulse_active,
             entry_flash_id=state_output.entry_flash_id,
@@ -655,14 +670,51 @@ class BondFireVision:
             return AudioState.PARTY
         return AudioState.SILENT
 
-    def _get_wind_value(self, now: float) -> int:
+    def _get_wind_snapshot(self, now: float) -> tuple[int, list[tuple[int, int, int]]]:
         if self._wind_udp_cfg.enabled:
             with self._wind_udp_lock:
                 if now - self._wind_udp_last_update <= self._wind_udp_cfg.timeout:
-                    return self._wind_udp_value
+                    return self._wind_udp_value, list(self._wind_udp_colors)
                 if self._wind_udp_value > 0 and now - self._wind_udp_last_update <= 0.5:
-                    return self._wind_udp_value
-        return self._shake_listener.get_wind_value() if self._shake_listener else 0
+                    return self._wind_udp_value, list(self._wind_udp_colors)
+        if self._shake_listener:
+            if hasattr(self._shake_listener, "get_wind_snapshot"):
+                return self._shake_listener.get_wind_snapshot()
+            return self._shake_listener.get_wind_value(), []
+        return 0, []
+
+    def _get_wind_value(self, now: float) -> int:
+        wind_value, _colors = self._get_wind_snapshot(now)
+        return wind_value
+
+    def _update_fan_pulse(
+        self,
+        now: float,
+        wind_value: int,
+        colors: list[tuple[int, int, int]],
+    ) -> None:
+        if wind_value < self._fan_pulse_min_wind or not colors:
+            self._fan_pulse_value = 0.0
+            self._fan_pulse_active = False
+            return
+
+        if not self._fan_pulse_active and now - self._fan_pulse_last_trigger >= self._fan_pulse_interval:
+            self._fan_pulse_active = True
+            self._fan_pulse_start = now
+            self._fan_pulse_color = random.choice(colors)
+
+        if not self._fan_pulse_active:
+            self._fan_pulse_value = 0.0
+            return
+
+        progress = (now - self._fan_pulse_start) / self._fan_pulse_duration
+        if progress >= 1.0:
+            self._fan_pulse_active = False
+            self._fan_pulse_value = 0.0
+            self._fan_pulse_last_trigger = now
+            return
+
+        self._fan_pulse_value = min(1.0, max(0.0, progress))
 
     def _wind_udp_listener(self, stop_event: threading.Event) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -683,10 +735,12 @@ class BondFireVision:
                 break
 
             wind_value = None
+            colors_value = None
             try:
                 payload = json.loads(data.decode("utf-8"))
                 if isinstance(payload, dict):
                     wind_value = payload.get("wind")
+                    colors_value = payload.get("colors")
                 else:
                     wind_value = payload
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -704,9 +758,18 @@ class BondFireVision:
                 continue
 
             wind_value = max(0, min(100, wind_value))
+            colors: list[tuple[int, int, int]] = []
+            if isinstance(colors_value, list):
+                for item in colors_value:
+                    if isinstance(item, list) and len(item) >= 3:
+                        try:
+                            colors.append((int(item[0]), int(item[1]), int(item[2])))
+                        except (TypeError, ValueError):
+                            continue
             with self._wind_udp_lock:
                 self._wind_udp_value = wind_value
                 self._wind_udp_last_update = time.monotonic()
+                self._wind_udp_colors = colors
             print(f"Received wind={wind_value}", flush=True)
 
         sock.close()

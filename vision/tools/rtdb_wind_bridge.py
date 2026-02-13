@@ -5,6 +5,43 @@ import time
 import urllib.request
 
 
+def _parse_rgb(value):
+    if isinstance(value, list) and len(value) >= 3:
+        try:
+            return [int(value[0]), int(value[1]), int(value[2])]
+        except (TypeError, ValueError):
+            return None
+    if isinstance(value, str) and value.startswith("#") and len(value) == 7:
+        try:
+            return [int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)]
+        except ValueError:
+            return None
+    return None
+
+
+def extract_colors(shakes: dict) -> list[list[int]]:
+    if not isinstance(shakes, dict):
+        return []
+    colors = []
+    seen = set()
+    for payload in shakes.values():
+        if not isinstance(payload, dict):
+            continue
+        rgb = _parse_rgb(payload.get("color_rgb"))
+        if rgb is None:
+            rgb = _parse_rgb(payload.get("color"))
+        if rgb is None:
+            rgb = _parse_rgb(payload.get("color_hex"))
+        if rgb is None:
+            continue
+        key = tuple(rgb)
+        if key in seen:
+            continue
+        seen.add(key)
+        colors.append(rgb)
+    return colors
+
+
 def fetch_shakes(database_url: str, timestamp_sec: int):
     base_url = database_url.rstrip("/")
     url = f"{base_url}/shakes/{timestamp_sec}.json"
@@ -47,7 +84,8 @@ def main() -> int:
         try:
             shakes = fetch_shakes(args.database_url, timestamp_sec)
             wind = compute_wind(shakes, args.max_concurrent_shakes, args.wind_max)
-            payload = json.dumps({"wind": wind}).encode("utf-8")
+            colors = extract_colors(shakes)
+            payload = json.dumps({"wind": wind, "colors": colors}).encode("utf-8")
             sock.sendto(payload, (args.udp_host, args.udp_port))
             print(f"Sent wind={wind} from {timestamp_sec}", flush=True)
         except Exception as exc:

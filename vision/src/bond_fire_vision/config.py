@@ -74,6 +74,14 @@ class WindUdpConfig:
 
 
 @dataclass
+class FanningPulseConfig:
+    """Fan pulse timing configuration."""
+    min_wind: int
+    pulse_duration: float
+    pulse_interval: float
+
+
+@dataclass
 class DebugConfig:
     """Debug configuration."""
     verbose_logging: bool
@@ -90,6 +98,7 @@ class Config:
     vision: VisionConfig
     firebase: FirebaseConfig
     wind_udp: WindUdpConfig
+    fanning_pulse: FanningPulseConfig
     debug: DebugConfig
 
 
@@ -188,6 +197,11 @@ def _parse_config(data: dict) -> Config:
             listen_host=data.get("wind_udp", {}).get("listen_host", "0.0.0.0"),
             listen_port=data.get("wind_udp", {}).get("listen_port", 4211),
             timeout=data.get("wind_udp", {}).get("timeout", 2.0),
+        ),
+        fanning_pulse=FanningPulseConfig(
+            min_wind=int(data.get("fanning_pulse", {}).get("min_wind", 15)),
+            pulse_duration=float(data.get("fanning_pulse", {}).get("pulse_duration", 1.6)),
+            pulse_interval=float(data.get("fanning_pulse", {}).get("pulse_interval", 1.9)),
         ),
         debug=DebugConfig(
             verbose_logging=data["debug"]["verbose_logging"],

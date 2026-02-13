@@ -50,6 +50,8 @@ class PacketBuilderV2:
         mist_pwm: int,
         fan_pwm: int,
         wind: int,
+        fan_pulse: float = 0.0,
+        fan_pulse_color: Optional[tuple[int, int, int]] = None,
         fire_intensity: float = 0.0,
         pulse_active: bool = False,
         entry_flash_id: Optional[int] = None,
@@ -67,6 +69,8 @@ class PacketBuilderV2:
             mist_pwm: Mist atomizer PWM (0-255)
             fan_pwm: Fan PWM (0-255)
             wind: Fanning intensity (0-100)
+            fan_pulse: Fan pulse envelope (0.0-1.0)
+            fan_pulse_color: RGB color for fan pulse
             fire_intensity: Fire intensity (0.0-1.0)
             pulse_active: True during 15s color pulse
             entry_flash_id: Track ID for entry flash (or None)
@@ -119,7 +123,11 @@ class PacketBuilderV2:
         wind = max(0, min(100, int(wind)))
         wind = int(round(wind / 25.0)) * 25
         wind = max(0, min(100, wind))
+        fan_pulse = max(0.0, min(1.0, float(fan_pulse)))
         fire_intensity = max(0.0, min(1.0, fire_intensity))
+
+        if fan_pulse_color is None:
+            fan_pulse_color = (255, 120, 60)
 
         packet = {
             "version": self.PROTOCOL_VERSION,
@@ -132,6 +140,8 @@ class PacketBuilderV2:
             "mist_pwm": mist_pwm,
             "fan_pwm": fan_pwm,
             "wind": wind,
+            "fan_pulse": round(fan_pulse, 3),
+            "fan_pulse_color": [int(v) for v in fan_pulse_color],
             "fire_intensity": round(fire_intensity, 2),
             "pulse_active": pulse_active,
             "entry_flash_id": entry_flash_id,

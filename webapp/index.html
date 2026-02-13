@@ -8,6 +8,19 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Space+Grotesk:wght@400;600;700&display=swap');
+
+        :root {
+            --bg-deep: #0b0f14;
+            --bg-warm: #1f1a16;
+            --accent: #ff6b6b;
+            --accent-strong: #ff8855;
+            --text-muted: #b6b0a6;
+            --panel: rgba(255, 255, 255, 0.06);
+            --panel-strong: rgba(255, 255, 255, 0.12);
+            --fan-color: #ff6b6b;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -15,8 +28,9 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+            background: radial-gradient(circle at top, rgba(255, 150, 80, 0.15), transparent 45%),
+                linear-gradient(135deg, var(--bg-deep) 0%, var(--bg-warm) 100%);
             color: #fff;
             min-height: 100vh;
             display: flex;
@@ -41,9 +55,10 @@
         }
 
         h1 {
-            font-size: 2.5em;
+            font-family: 'Fraunces', 'Times New Roman', serif;
+            font-size: 2.6em;
             margin-bottom: 10px;
-            background: linear-gradient(45deg, #ff6b6b, #ff9068);
+            background: linear-gradient(45deg, var(--accent), #ffd36b);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -51,7 +66,7 @@
 
         .subtitle {
             font-size: 1.2em;
-            color: #aaa;
+            color: var(--text-muted);
             margin-bottom: 40px;
         }
 
@@ -86,8 +101,8 @@
             width: 250px;
             height: 250px;
             border-radius: 50%;
-            border: 5px solid #ff6b6b;
-            background: radial-gradient(circle at 30% 30%, #ff9068, #ff6b6b, #c44569);
+            border: 5px solid var(--fan-color);
+            background: radial-gradient(circle at 30% 30%, #ff9068, var(--fan-color), #c44569);
             font-size: 1.5em;
             font-weight: bold;
             color: white;
@@ -96,7 +111,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 10px 40px rgba(255, 107, 107, 0.4);
+            box-shadow: 0 10px 40px rgba(255, 107, 107, 0.4), 0 0 0 6px rgba(255, 255, 255, 0.03);
             transition: all 0.3s ease;
             user-select: none;
             -webkit-tap-highlight-color: transparent;
@@ -128,36 +143,13 @@
         .instructions {
             margin-top: 30px;
             padding: 20px;
-            background: rgba(255, 255, 255, 0.05);
+            background: var(--panel);
             border-radius: 10px;
             font-size: 1em;
             line-height: 1.6;
         }
 
-        .stats {
-            margin-top: 20px;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 10px;
-            display: flex;
-            justify-content: space-around;
-            flex-wrap: wrap;
-        }
 
-        .stat {
-            margin: 10px;
-        }
-
-        .stat-label {
-            font-size: 0.9em;
-            color: #aaa;
-        }
-
-        .stat-value {
-            font-size: 1.8em;
-            font-weight: bold;
-            color: #ff6b6b;
-        }
 
         .permission-prompt {
             padding: 20px;
@@ -183,10 +175,10 @@
 
         .skip-note {
             font-size: 0.95em;
-            color: #aaa;
+            color: var(--text-muted);
             margin-top: 15px;
             padding: 15px;
-            background: rgba(255, 255, 255, 0.05);
+            background: var(--panel);
             border-radius: 8px;
         }
 
@@ -197,7 +189,7 @@
         details {
             margin-top: 20px;
             padding: 15px;
-            background: rgba(255, 255, 255, 0.05);
+            background: var(--panel);
             border-radius: 10px;
             text-align: center;
         }
@@ -212,7 +204,7 @@
         }
 
         details summary:hover {
-            background: rgba(255, 255, 255, 0.1);
+            background: var(--panel-strong);
         }
 
         details ol {
@@ -229,12 +221,12 @@
         }
 
         .btn {
-            background: #ff6b6b;
+            background: var(--accent);
             color: white;
             border: none;
-            padding: 15px 30px;
+            padding: 12px 22px;
             border-radius: 25px;
-            font-size: 1.1em;
+            font-size: 1.0em;
             font-weight: 600;
             cursor: pointer;
             margin-top: 15px;
@@ -242,13 +234,93 @@
         }
 
         .btn:hover {
-            background: #ff5252;
+            background: var(--accent-strong);
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
         }
 
         .btn:active {
             transform: translateY(0);
+        }
+
+        .color-picker {
+            width: 100%;
+            background: var(--panel);
+            border-radius: 16px;
+            padding: 16px 18px;
+            margin: 10px 0 10px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(8px);
+        }
+
+        .color-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .color-title {
+            font-weight: 700;
+            font-size: 1.05em;
+        }
+
+        .color-selected {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.95em;
+            color: var(--text-muted);
+        }
+
+        .color-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--fan-color);
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+        }
+
+        .color-swatches {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+        }
+
+        .color-swatch {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            border-radius: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+            position: relative;
+        }
+
+        .color-swatch.selected {
+            border-color: rgba(255, 255, 255, 0.7);
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.15), 0 10px 20px rgba(0, 0, 0, 0.35);
+            transform: translateY(-2px) scale(1.02);
+        }
+
+        .color-swatch::after {
+            content: '';
+            position: absolute;
+            inset: 6px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            opacity: 0.3;
+        }
+
+        @media (max-width: 480px) {
+            .color-swatches {
+                grid-template-columns: repeat(5, minmax(0, 1fr));
+            }
+
+            .fire-button {
+                width: 220px;
+                height: 220px;
+            }
         }
     </style>
 </head>
@@ -261,16 +333,21 @@
         <div id="status" class="status connecting">Connecting to RTDB...</div>
 
         <div id="permission-prompt" class="permission-prompt" style="display: none;">
-            <p><strong>🎮 Two Ways to Play:</strong></p>
-            <div class="skip-note">
-                <strong>Easy Way:</strong> Just tap the fire button below!<br>
-                Works exactly the same as shaking. No permission needed. ✨
+            <p><strong>Shake detection</strong></p>
+            <p class="permission-note">Tap to enable motion access on iOS.</p>
+            <button class="btn" onclick="requestMotionPermission()">Enable</button>
+            <p class="permission-hint">Prefer no permissions? Tap the flame instead.</p>
+        </div>
+
+        <div class="color-picker">
+            <div class="color-header">
+                <div class="color-title">Your flame color</div>
+                <div class="color-selected">
+                    <span class="color-dot" id="selected-color-dot"></span>
+                    <span id="selected-color-name">Ember</span>
+                </div>
             </div>
-            <p style="margin-top: 20px; font-size: 0.9em;">OR enable shake detection:</p>
-            <button class="btn" onclick="requestMotionPermission()">Enable Shake Detection</button>
-            <p style="font-size: 0.8em; color: #999; margin-top: 10px;">
-                (iOS will ask for motion sensor permission)
-            </p>
+            <div class="color-swatches" id="color-swatches"></div>
         </div>
 
         <div id="fire-button" class="fire-button">
@@ -278,20 +355,8 @@
         </div>
 
         <div class="instructions">
-            <strong>How to play:</strong><br>
-            Shake your phone to fan the flames!<br>
-            More people shaking = bigger flames 🔥
-        </div>
-
-        <div class="stats">
-            <div class="stat">
-                <div class="stat-label">Your Shakes</div>
-                <div class="stat-value" id="shake-count">0</div>
-            </div>
-            <div class="stat">
-                <div class="stat-label">Active Fans</div>
-                <div class="stat-value" id="active-fans">0</div>
-            </div>
+            <strong>Be the wind.</strong><br>
+            Shake or tap to feed the fire.
         </div>
     </div>
 
@@ -318,13 +383,20 @@
         const SHAKE_THRESHOLD = 15; // m/s² (lowered from 20 for better sensitivity)
         const SHAKE_COOLDOWN = 500; // ms between shakes
 
+        const FAN_COLORS = [
+            { name: 'Ember', hex: '#ff6b6b', rgb: [255, 107, 107] },
+            { name: 'Citrus', hex: '#ffb84d', rgb: [255, 184, 77] },
+            { name: 'Lava', hex: '#ff7a45', rgb: [255, 122, 69] },
+            { name: 'Sky', hex: '#55c9ff', rgb: [85, 201, 255] },
+            { name: 'Plum', hex: '#c08bff', rgb: [192, 139, 255] }
+        ];
+
         // State
         let userId = getUserId();
-        let shakeCount = 0;
         let lastShakeTime = 0;
-        let activeFans = new Set();
         let motionPermissionGranted = false;
         let isConnected = true; // Firebase is always "connected" once initialized
+        let selectedColor = null;
 
         // Get or create user ID
         function getUserId() {
@@ -393,12 +465,12 @@
                 shakeRef.set({
                     user_id: userId,
                     timestamp: timestampSec,
-                    timestamp_ms: timestampMs
+                    timestamp_ms: timestampMs,
+                    color_name: selectedColor ? selectedColor.name : null,
+                    color_hex: selectedColor ? selectedColor.hex : null,
+                    color_rgb: selectedColor ? selectedColor.rgb : null
                 }).then(() => {
                     console.log('✅ Shake published to Firebase!');
-                    shakeCount++;
-                    document.getElementById('shake-count').textContent = shakeCount;
-
                     // Visual feedback
                     const button = document.getElementById('fire-button');
                     button.classList.add('shaking');
@@ -423,22 +495,8 @@
                     } else {
                         console.error('Motion permission denied by user');
                         updateStatus('🖱️ Tap Mode - Button works perfectly!', 'connected');
-                        document.getElementById('permission-prompt').innerHTML = `
-                            <div class="skip-note">
-                                <strong>✅ No Problem!</strong><br>
-                                Just tap the fire button - works exactly the same! 🔥
-                            </div>
-                            <details>
-                                <summary>Want shake detection? (Optional)</summary>
-                                <ol>
-                                    <li>Open <strong>Settings</strong> app</li>
-                                    <li>Scroll to <strong>Safari</strong></li>
-                                    <li>Enable <strong>Motion & Orientation Access</strong></li>
-                                    <li>Return here and reload</li>
-                                </ol>
-                                <button class="btn" onclick="location.reload()">Reload Page</button>
-                            </details>
-                        `;
+                        document.getElementById('permission-prompt').style.display = 'none';
+                        document.getElementById('fire-button').textContent = 'Tap to Fan';
                     }
                 } catch (err) {
                     console.error('Permission request failed:', err);
@@ -524,6 +582,8 @@
             console.log('Device supports motion?', typeof DeviceMotionEvent !== 'undefined');
             console.log('Needs permission?', typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function');
 
+            setupColorPicker();
+
             initializeFirebase();
 
             // Check if motion permission is needed (iOS 13+)
@@ -546,6 +606,46 @@
                 }
             });
         });
+
+        function setupColorPicker() {
+            const swatchContainer = document.getElementById('color-swatches');
+            swatchContainer.innerHTML = '';
+
+            const storedHex = localStorage.getItem('bondfire_color_hex');
+            const initialColor = FAN_COLORS.find((color) => color.hex === storedHex) ||
+                FAN_COLORS[Math.floor(Math.random() * FAN_COLORS.length)];
+
+            FAN_COLORS.forEach((color) => {
+                const swatch = document.createElement('button');
+                swatch.type = 'button';
+                swatch.className = 'color-swatch';
+                swatch.style.background = `radial-gradient(circle at 30% 30%, #ffffff55, ${color.hex})`;
+                swatch.setAttribute('aria-label', `${color.name} flame color`);
+                swatch.addEventListener('click', () => setSelectedColor(color));
+                swatchContainer.appendChild(swatch);
+            });
+
+            setSelectedColor(initialColor);
+        }
+
+        function setSelectedColor(color) {
+            selectedColor = color;
+            document.documentElement.style.setProperty('--fan-color', color.hex);
+            document.getElementById('selected-color-name').textContent = color.name;
+            const dot = document.getElementById('selected-color-dot');
+            dot.style.background = color.hex;
+
+            const swatches = Array.from(document.querySelectorAll('.color-swatch'));
+            swatches.forEach((swatch, index) => {
+                if (FAN_COLORS[index].hex === color.hex) {
+                    swatch.classList.add('selected');
+                } else {
+                    swatch.classList.remove('selected');
+                }
+            });
+
+            localStorage.setItem('bondfire_color_hex', color.hex);
+        }
     </script>
 </body>
 
