@@ -8,11 +8,13 @@ import sys
 import threading
 import time
 import json
+import random
 from typing import Tuple
 
 from .audio_manager import AudioManager, AudioState
 from .detector import BondFireVision
 from .config import get_config
+from .firebase_shake import FirebaseShakeListener
 from .local_prompts import LocalPromptGenerator
 from .packet_builder import PacketBuilderV2, Person
 from .state_machine import State, StateContext, StateMachine
@@ -206,6 +208,18 @@ def _run_manual_state(
     prompt_generator = LocalPromptGenerator()
     cfg = get_config()
     same_state_cooldown = cfg.prompts.same_state_cooldown
+    wind_udp_cfg = cfg.wind_udp
+    shake_listener: FirebaseShakeListener | None = None
+
+    if cfg.firebase.enabled:
+        shake_listener = FirebaseShakeListener(
+            firebase_url=cfg.firebase.database_url,
+            credentials_path=cfg.firebase.credentials_path,
+            max_concurrent_shakes=cfg.firebase.max_concurrent_shakes,
+            shake_timeout=cfg.firebase.shake_timeout,
+            wind_max=cfg.firebase.wind_max,
+        )
+        shake_listener.start()
 
     audio_manager: AudioManager | None = None
     if enable_audio:
@@ -217,18 +231,120 @@ def _run_manual_state(
         )
         audio_manager.start()
 
+    stop_event = threading.Event()
     state_lock = threading.Lock()
     manual_state = {
         "people_count": 0,
-        "fan_power": 0.0,
+        "wind_value": 0,
+        "wind_last_update": 0.0,
+        "wind_colors": [],
     }
     last_entry_id: int | None = None
     last_prompt_state: State | None = None
 
-    def _set_state(people_count: int, fan_power: float = 0.0) -> None:
+    def _set_state(people_count: int) -> None:
         with state_lock:
             manual_state["people_count"] = people_count
-            manual_state["fan_power"] = fan_power
+
+    def _wind_udp_listener() -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((wind_udp_cfg.listen_host, wind_udp_cfg.listen_port))
+        sock.settimeout(0.5)
+        print(
+            f"Listening for wind UDP on {wind_udp_cfg.listen_host}:{wind_udp_cfg.listen_port}",
+            flush=True,
+        )
+
+        while not stop_event.is_set():
+            try:
+                data, _addr = sock.recvfrom(2048)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            wind_value = None
+            colors_value = None
+            try:
+                payload = json.loads(data.decode("utf-8"))
+                if isinstance(payload, dict):
+                    wind_value = payload.get("wind")
+                    colors_value = payload.get("colors")
+                else:
+                    wind_value = payload
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                try:
+                    wind_value = int(data.decode("utf-8").strip())
+                except (ValueError, UnicodeDecodeError):
+                    wind_value = None
+
+            if wind_value is None:
+                continue
+
+            try:
+                wind_value = int(float(wind_value))
+            except (TypeError, ValueError):
+                continue
+
+            wind_value = max(0, min(100, wind_value))
+            colors: list[tuple[int, int, int]] = []
+            if isinstance(colors_value, list):
+                for item in colors_value:
+                    if isinstance(item, list) and len(item) >= 3:
+                        try:
+                            colors.append((int(item[0]), int(item[1]), int(item[2])))
+                        except (TypeError, ValueError):
+                            continue
+            with state_lock:
+                manual_state["wind_value"] = wind_value
+                manual_state["wind_last_update"] = time.monotonic()
+                manual_state["wind_colors"] = colors
+
+        sock.close()
+
+    fan_pulse_min_wind = max(0, int(cfg.fanning_pulse.min_wind))
+    fan_pulse_duration = max(0.1, float(cfg.fanning_pulse.pulse_duration))
+    fan_pulse_interval = max(0.1, float(cfg.fanning_pulse.pulse_interval))
+    fan_pulse_value = 0.0
+    fan_pulse_color: tuple[int, int, int] = (255, 120, 60)
+    fan_pulse_start = 0.0
+    fan_pulse_last_trigger = 0.0
+    fan_pulse_active = False
+
+    def _update_fan_pulse(
+        now: float,
+        wind_value: int,
+        colors: list[tuple[int, int, int]],
+    ) -> None:
+        nonlocal fan_pulse_value
+        nonlocal fan_pulse_color
+        nonlocal fan_pulse_start
+        nonlocal fan_pulse_last_trigger
+        nonlocal fan_pulse_active
+
+        if wind_value < fan_pulse_min_wind or not colors:
+            fan_pulse_value = 0.0
+            fan_pulse_active = False
+            return
+
+        if not fan_pulse_active and now - fan_pulse_last_trigger >= fan_pulse_interval:
+            fan_pulse_active = True
+            fan_pulse_start = now
+            fan_pulse_color = random.choice(colors)
+
+        if not fan_pulse_active:
+            fan_pulse_value = 0.0
+            return
+
+        progress = (now - fan_pulse_start) / fan_pulse_duration
+        if progress >= 1.0:
+            fan_pulse_active = False
+            fan_pulse_value = 0.0
+            fan_pulse_last_trigger = now
+            return
+
+        fan_pulse_value = min(1.0, max(0.0, progress))
 
     def _worker() -> None:
         nonlocal last_entry_id
@@ -246,7 +362,9 @@ def _run_manual_state(
             now = time.monotonic()
             with state_lock:
                 people_count = manual_state["people_count"]
-                fan_power = manual_state["fan_power"]
+                wind_value = manual_state["wind_value"]
+                wind_last_update = manual_state["wind_last_update"]
+                wind_colors = list(manual_state["wind_colors"])
 
             context = StateContext(
                 people_count=people_count,
@@ -295,6 +413,16 @@ def _run_manual_state(
             if audio_manager and audio_state in (AudioState.AMBIENT, AudioState.PARTY):
                 audio_manager.set_fire_intensity(fire_intensity)
 
+            if wind_udp_cfg.enabled and now - wind_last_update <= wind_udp_cfg.timeout:
+                pass
+            elif shake_listener:
+                wind_value = shake_listener.get_wind_value()
+                wind_colors = []
+            else:
+                wind_value = 0
+                wind_colors = []
+
+            _update_fan_pulse(now, wind_value, wind_colors)
             packet = packet_builder.build(
                 state=state,
                 people=people,
@@ -302,7 +430,9 @@ def _run_manual_state(
                 prompt=prompt,
                 mist_pwm=mist_pwm,
                 fan_pwm=fan_pwm,
-                wind=int(round(fan_power)),
+                wind=wind_value,
+                fan_pulse=fan_pulse_value,
+                fan_pulse_color=fan_pulse_color,
                 fire_intensity=fire_intensity,
                 pulse_active=state_output.pulse_active,
                 entry_flash_id=state_output.entry_flash_id,
@@ -318,7 +448,7 @@ def _run_manual_state(
 
             if now - last_log >= 1.0:
                 print(
-                    f"[MANUAL] {state.value} | people={people_count} | fire={fire_intensity:.2f} | wind={fan_power:.0f}",
+                    f"[MANUAL] {state.value} | people={people_count} | fire={fire_intensity:.2f} | wind={wind_value:.0f}",
                     flush=True,
                 )
                 last_log = now
@@ -327,6 +457,10 @@ def _run_manual_state(
 
     worker_thread = threading.Thread(target=_worker, name="manual-state-worker", daemon=True)
     worker_thread.start()
+    wind_udp_thread: threading.Thread | None = None
+    if wind_udp_cfg.enabled:
+        wind_udp_thread = threading.Thread(target=_wind_udp_listener, name="manual-wind-udp", daemon=True)
+        wind_udp_thread.start()
     print("Manual state mode active. Choose a scenario below.", flush=True)
 
     try:
@@ -334,22 +468,27 @@ def _run_manual_state(
             _print_manual_menu()
             choice = input("Select scenario: ").strip()
             if choice == "1":
-                _set_state(0, 0.0)
+                _set_state(0)
             elif choice == "2":
-                _set_state(1, 0.0)
+                _set_state(1)
             elif choice == "3":
-                _set_state(3, 0.0)
+                _set_state(2)
             elif choice == "4":
-                _set_state(4, 0.0)
+                _set_state(3)
             elif choice == "5":
-                _set_state(5, 0.0)
+                _set_state(4)
+            elif choice == "6":
+                _set_state(5)
             elif choice == "9":
                 break
             else:
                 print("Invalid selection. Try again.", flush=True)
     finally:
+        stop_event.set()
         if audio_manager:
             audio_manager.stop()
+        if shake_listener:
+            shake_listener.stop()
         try:
             sock.close()
         except OSError:
@@ -360,9 +499,10 @@ def _print_manual_menu() -> None:
     print("\nManual State Mode", flush=True)
     print("1) IDLE (0 people)", flush=True)
     print("2) FIRE (1 person)", flush=True)
-    print("3) FIRE (3 people)", flush=True)
-    print("4) FIRE (4 people)", flush=True)
-    print("5) PARTY (5 people)", flush=True)
+    print("3) FIRE (2 people)", flush=True)
+    print("4) FIRE (3 people)", flush=True)
+    print("5) FIRE (4 people)", flush=True)
+    print("6) PARTY (5 people)", flush=True)
     print("9) Quit", flush=True)
 
 
