@@ -6,6 +6,7 @@ import argparse
 import socket
 import sys
 import threading
+from pynput import keyboard
 import time
 import json
 import random
@@ -463,28 +464,27 @@ def _run_manual_state(
         wind_udp_thread.start()
     print("Manual state mode active. Choose a scenario below.", flush=True)
 
+    print("Manual state mode active. Press 0-5 to set people count, or 'q' to quit.", flush=True)
+    def on_press(key):
+        try:
+            if hasattr(key, 'char'):
+                if key.char in ('0','1','2','3','4','5'):
+                    _set_state(int(key.char))
+                    print(f"[KEY] Set people count to {key.char}", flush=True)
+                elif key.char in ('q', 'Q'):
+                    print("[KEY] Quit signal received.", flush=True)
+                    stop_event.set()
+                    return False
+        except Exception as e:
+            print(f"[KEY] Error: {e}", flush=True)
+    listener = keyboard.Listener(on_press=on_press)
+    listener.start()
     try:
-        while True:
-            _print_manual_menu()
-            choice = input("Select scenario: ").strip()
-            if choice == "1":
-                _set_state(0)
-            elif choice == "2":
-                _set_state(1)
-            elif choice == "3":
-                _set_state(2)
-            elif choice == "4":
-                _set_state(3)
-            elif choice == "5":
-                _set_state(4)
-            elif choice == "6":
-                _set_state(5)
-            elif choice == "9":
-                break
-            else:
-                print("Invalid selection. Try again.", flush=True)
+        while not stop_event.is_set():
+            time.sleep(0.1)
     finally:
         stop_event.set()
+        listener.stop()
         if audio_manager:
             audio_manager.stop()
         if shake_listener:
