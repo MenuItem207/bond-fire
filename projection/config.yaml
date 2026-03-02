@@ -26,6 +26,8 @@ text:
   angle_offset_deg: 0.0
   clockwise: true
   alpha: 1.2
+  fade_sec: 0.7
+  fade_gamma: 2.2
   spin_speed: 0.03
   height_scale: 2.4
   glyph_scale: 3.3

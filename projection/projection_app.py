@@ -405,6 +405,9 @@ class BondFireProjection(mglw.WindowConfig):
         self._wind_prompt_min = int(self._visuals.get("wind_prompt_min", 25))
         self._wind_prompt_hold_sec = float(self._visuals.get("wind_prompt_hold_sec", 2.5))
         self._wind_prompt_cooldown_sec = float(self._visuals.get("wind_prompt_cooldown_sec", 4.0))
+        self._prompt_from: str = ""
+        self._prompt_to: str = ""
+        self._prompt_blend: float = 1.0
 
     def close(self) -> None:
         if self._listener:
@@ -494,7 +497,8 @@ class BondFireProjection(mglw.WindowConfig):
                 uniform float u_video_mix;
                 uniform float u_video_alpha;
                 uniform float u_video_colorize;
-                uniform sampler2D u_text;
+                uniform sampler2D u_text_prev;
+                uniform sampler2D u_text_next;
                 uniform float u_text_mix;
                 uniform int u_text_mode;
                 uniform float u_text_radius;
@@ -502,6 +506,8 @@ class BondFireProjection(mglw.WindowConfig):
                 uniform float u_text_angle;
                 uniform float u_text_dir;
                 uniform float u_text_alpha;
+                uniform float u_text_prev_alpha;
+                uniform float u_text_next_alpha;
                 uniform float u_text_speed;
                 uniform float u_text_stretch;
                 uniform float u_baseline_fire;
@@ -686,19 +692,26 @@ class BondFireProjection(mglw.WindowConfig):
                         color = mix(color, vid_color, clamp(u_video_mix, 0.0, 1.0) * u_video_alpha);
                     }
 
-                    vec4 text_sample = vec4(0.0);
+                    vec4 text_prev = vec4(0.0);
+                    vec4 text_next = vec4(0.0);
                     if (u_text_mode == 1) {
                         float angle = atan(delta.y, delta.x);
                         float u = angle / (2.0 * 3.14159265) + 0.5 + u_text_angle + (u_time * u_text_speed);
                         float v = ((dist - u_text_radius) / u_text_band) * u_text_stretch + 0.5;
-                        vec4 arc_a = texture(u_text, vec2(fract(u * u_text_dir), v));
-                        vec4 arc_b = texture(u_text, vec2(fract((u + 0.5) * u_text_dir), v));
-                        text_sample = max(arc_a, arc_b);
+                        vec4 prev_arc_a = texture(u_text_prev, vec2(fract(u * u_text_dir), v));
+                        vec4 prev_arc_b = texture(u_text_prev, vec2(fract((u + 0.5) * u_text_dir), v));
+                        text_prev = max(prev_arc_a, prev_arc_b);
+                        vec4 next_arc_a = texture(u_text_next, vec2(fract(u * u_text_dir), v));
+                        vec4 next_arc_b = texture(u_text_next, vec2(fract((u + 0.5) * u_text_dir), v));
+                        text_next = max(next_arc_a, next_arc_b);
                     } else {
                         vec2 text_uv = vec2(uv.x, 1.0 - uv.y);
-                        text_sample = texture(u_text, text_uv);
+                        text_prev = texture(u_text_prev, text_uv);
+                        text_next = texture(u_text_next, text_uv);
                     }
-                    color = mix(color, text_sample.rgb, text_sample.a * u_text_mix * u_text_alpha);
+                    vec3 text_rgb = text_prev.rgb * u_text_prev_alpha + text_next.rgb * u_text_next_alpha;
+                    float text_a = text_prev.a * u_text_prev_alpha + text_next.a * u_text_next_alpha;
+                    color = mix(color, text_rgb, text_a * u_text_mix * u_text_alpha);
 
                     float vignette = smoothstep(0.98, 0.25, dist);
                     float edge_fade = smoothstep(0.98, 0.82, dist);
@@ -718,8 +731,10 @@ class BondFireProjection(mglw.WindowConfig):
             size = (2048, 512)
         else:
             size = (1024, 512)
-        self._text_layer = TextLayer(size, font_name, font_size)
-        self._text_texture = self._text_layer.to_texture(self.ctx)
+        self._text_layer_prev = TextLayer(size, font_name, font_size)
+        self._text_texture_prev = self._text_layer_prev.to_texture(self.ctx)
+        self._text_layer_next = TextLayer(size, font_name, font_size)
+        self._text_texture_next = self._text_layer_next.to_texture(self.ctx)
 
     def _setup_video(self) -> None:
         video_cfg = self.config_data.get("video", {})
@@ -795,6 +810,24 @@ class BondFireProjection(mglw.WindowConfig):
             return list(target)
         return [self._smooth_color(c, t, dt, tau) for c, t in zip(current, target)]
 
+    def _update_prompt_fade(self, target_prompt: str, dt: float) -> None:
+        fade_sec = float(self._text_cfg.get("fade_sec", 0.35))
+        if fade_sec <= 0.0:
+            self._prompt_from = target_prompt
+            self._prompt_to = target_prompt
+            self._prompt_blend = 1.0
+            return
+
+        if target_prompt != self._prompt_to:
+            current_visible = self._prompt_to if self._prompt_blend >= 0.5 else self._prompt_from
+            self._prompt_from = current_visible
+            self._prompt_to = target_prompt
+            self._prompt_blend = 0.0
+
+        if self._prompt_blend < 1.0:
+            step = min(1.0, max(0.0, dt) / fade_sec)
+            self._prompt_blend = min(1.0, self._prompt_blend + step)
+
     def on_render(self, time: float, frame_time: float) -> None:
         if self.args.no_udp:
             self._advance_demo(frame_time)
@@ -840,8 +873,9 @@ class BondFireProjection(mglw.WindowConfig):
 
         text_cfg = self._text_cfg
         if text_cfg.get("enabled", True):
-            self._text_layer.update_text(
-                state_snapshot.prompt,
+            self._update_prompt_fade(state_snapshot.prompt, dt)
+            self._text_layer_prev.update_text(
+                self._prompt_from,
                 tuple(text_cfg.get("position", [0.5, 0.84])),
                 tuple(text_cfg.get("color", [255, 236, 210])),
                 float(text_cfg.get("box_width", 0.86)),
@@ -858,9 +892,30 @@ class BondFireProjection(mglw.WindowConfig):
                 float(text_cfg.get("glyph_scale", 1.0)),
                 bool(text_cfg.get("repeat_text", False)),
             )
-            if self._text_layer._dirty:
-                self._text_texture.release()
-                self._text_texture = self._text_layer.to_texture(self.ctx)
+            self._text_layer_next.update_text(
+                self._prompt_to,
+                tuple(text_cfg.get("position", [0.5, 0.84])),
+                tuple(text_cfg.get("color", [255, 236, 210])),
+                float(text_cfg.get("box_width", 0.86)),
+                int(text_cfg.get("max_chars", 90)),
+                str(text_cfg.get("mode", "linear")),
+                float(text_cfg.get("circle_radius", 0.35)),
+                float(text_cfg.get("start_angle_deg", -90.0)),
+                float(text_cfg.get("letter_spacing", 1.0)),
+                bool(text_cfg.get("clockwise", True)),
+                int(text_cfg.get("outline_px", 2)),
+                tuple(text_cfg.get("outline_color", [10, 10, 10])),
+                tuple(text_cfg.get("shadow_offset", [2, 2])),
+                int(text_cfg.get("shadow_alpha", 140)),
+                float(text_cfg.get("glyph_scale", 1.0)),
+                bool(text_cfg.get("repeat_text", False)),
+            )
+            if self._text_layer_prev._dirty:
+                self._text_texture_prev.release()
+                self._text_texture_prev = self._text_layer_prev.to_texture(self.ctx)
+            if self._text_layer_next._dirty:
+                self._text_texture_next.release()
+                self._text_texture_next = self._text_layer_next.to_texture(self.ctx)
 
         if self._video_layer and self._video_texture:
             frame = self._video_layer.update(frame_time)
@@ -934,7 +989,15 @@ class BondFireProjection(mglw.WindowConfig):
         self._set_uniform(prog, "u_text_band", max(0.01, ring_band))
         self._set_uniform(prog, "u_text_angle", angle_offset)
         self._set_uniform(prog, "u_text_dir", 1.0 if text_cfg.get("clockwise", True) else -1.0)
+        fade_gamma = float(text_cfg.get("fade_gamma", 2.2))
+        if fade_gamma <= 0.0:
+            fade_gamma = 1.0
+        blend = clamp(self._prompt_blend, 0.0, 1.0)
+        prev_alpha = math.pow(1.0 - blend, fade_gamma)
+        next_alpha = math.pow(blend, fade_gamma)
         self._set_uniform(prog, "u_text_alpha", float(text_cfg.get("alpha", 1.0)))
+        self._set_uniform(prog, "u_text_prev_alpha", prev_alpha)
+        self._set_uniform(prog, "u_text_next_alpha", next_alpha)
         self._set_uniform(prog, "u_text_speed", float(text_cfg.get("spin_speed", 0.02)))
         self._set_uniform(prog, "u_text_stretch", float(text_cfg.get("height_scale", 1.0)))
         self._set_uniform(prog, "u_background", float(self._visuals.get("background_intensity", 0.1)))
@@ -954,11 +1017,13 @@ class BondFireProjection(mglw.WindowConfig):
             self._set_uniform(prog, f"u_palette[{idx}]", palette[idx])
         self._set_uniform(prog, "u_state_color", state_color)
 
-        self._set_uniform(prog, "u_text", 0)
-        self._text_texture.use(location=0)
+        self._set_uniform(prog, "u_text_prev", 0)
+        self._text_texture_prev.use(location=0)
+        self._set_uniform(prog, "u_text_next", 1)
+        self._text_texture_next.use(location=1)
         if self._video_texture:
-            self._set_uniform(prog, "u_video", 1)
-            self._video_texture.use(location=1)
+            self._set_uniform(prog, "u_video", 2)
+            self._video_texture.use(location=2)
         self._vao.render(moderngl.TRIANGLE_STRIP)
 
         if self._calibration:
